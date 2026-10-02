@@ -1,13 +1,10 @@
 import "server-only";
-import { promises as fs } from "node:fs";
-import path from "node:path";
+import { get, put } from "@vercel/blob";
 
-// Uploaded artwork and rendered design files, stored on local disk next to db.json.
-// Swap for object storage (S3, Vercel Blob, etc.) on serverless hosts.
-
-const root = path.join(process.cwd(), "data");
-const uploadsDir = path.join(root, "uploads");
-const designsDir = path.join(root, "designs");
+// Uploaded artwork and rendered design files, stored in a private Vercel Blob store.
+// Needs BLOB_READ_WRITE_TOKEN (set automatically when a Blob store is connected
+// to the Vercel project; run `vercel env pull .env.local` for local dev).
+// Files are served through our own /api routes, never by direct Blob URL.
 
 export const UPLOAD_TYPES: Record<string, string> = {
   "image/png": "png",
@@ -20,22 +17,26 @@ export const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
 const ID = /^[0-9a-f-]{36}$/;
 export const isId = (id: string) => ID.test(id);
 
-const typeFor = (ext: string) =>
-  Object.entries(UPLOAD_TYPES).find(([, e]) => e === ext)?.[0] ?? "application/octet-stream";
+async function write(pathname: string, body: Buffer | string, contentType: string) {
+  await put(pathname, body, { access: "private", contentType, addRandomSuffix: false, allowOverwrite: true });
+}
+
+async function read(pathname: string) {
+  const result = await get(pathname, { access: "private" }).catch(() => null);
+  if (!result || result.statusCode !== 200) return null;
+  return {
+    bytes: Buffer.from(await new Response(result.stream).arrayBuffer()),
+    type: result.blob.contentType,
+  };
+}
 
 export async function saveUpload(id: string, type: string, bytes: Buffer) {
-  await fs.mkdir(uploadsDir, { recursive: true });
-  await fs.writeFile(path.join(uploadsDir, `${id}.${UPLOAD_TYPES[type]}`), bytes);
+  await write(`uploads/${id}`, bytes, type);
 }
 
 export async function readUpload(id: string) {
   if (!isId(id)) return null;
-  for (const ext of Object.values(UPLOAD_TYPES)) {
-    try {
-      return { bytes: await fs.readFile(path.join(uploadsDir, `${id}.${ext}`)), type: typeFor(ext) };
-    } catch {}
-  }
-  return null;
+  return read(`uploads/${id}`);
 }
 
 /** Design files: `design.json`, `<side>-preview.png`, `<side>-print.png`. */
@@ -44,16 +45,10 @@ export const isDesignFile = (name: string) => DESIGN_FILE.test(name);
 
 export async function saveDesignFile(id: string, name: string, bytes: Buffer | string) {
   if (!isId(id) || !isDesignFile(name)) throw new Error("Invalid design file");
-  const dir = path.join(designsDir, id);
-  await fs.mkdir(dir, { recursive: true });
-  await fs.writeFile(path.join(dir, name), bytes);
+  await write(`designs/${id}/${name}`, bytes, name.endsWith(".png") ? "image/png" : "application/json");
 }
 
 export async function readDesignFile(id: string, name: string) {
   if (!isId(id) || !isDesignFile(name)) return null;
-  try {
-    return await fs.readFile(path.join(designsDir, id, name));
-  } catch {
-    return null;
-  }
+  return (await read(`designs/${id}/${name}`))?.bytes ?? null;
 }

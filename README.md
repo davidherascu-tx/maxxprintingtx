@@ -15,8 +15,8 @@ Next.js 16 (App Router) + React 19 + Tailwind CSS 4 storefront for Maxx Marketin
 ## Getting started
 
 ```bash
-cp .env.example .env.local   # set SESSION_SECRET to a long random string
 npm install
+vercel link && vercel env pull .env.local   # pulls DATABASE_URL, BLOB_READ_WRITE_TOKEN, SESSION_SECRET
 npm run dev
 ```
 
@@ -28,7 +28,7 @@ Open http://localhost:3000.
 | --- | --- |
 | `lib/catalog.ts` | Categories, products, options and prices |
 | `lib/site.ts` | Business name, address, phone, email |
-| `lib/db.ts` | Users and orders store (JSON file at `data/db.json`) |
+| `lib/db.ts` | Users, orders and designs in Postgres (Neon); tables are created on first use |
 | `lib/session.ts` | Password hashing and session cookie |
 | `lib/actions.ts` | Server actions: sign up/in/out, profile, place order |
 | `proxy.ts` | Redirects signed-out visitors away from `/account` and `/checkout` |
@@ -36,12 +36,12 @@ Open http://localhost:3000.
 | `lib/design-fonts.ts` | Fonts offered in the studio |
 | `components/studio/` | The studio UI (`studio.tsx`) and Fabric.js canvas engine (`engine.ts`) |
 | `app/api/uploads`, `app/api/designs` | Image upload and design save/serve endpoints |
-| `lib/files.ts` | Disk storage for uploads and design files (`data/uploads`, `data/designs`) |
+| `lib/files.ts` | Uploads and design files in a private Vercel Blob store (`uploads/`, `designs/<id>/`) |
 | `public/products` | Product images (from the InkSoft store) |
 
 ## Before going live
 
-- `data/` (db.json, uploads, designs) only works on a server with a writable disk. On Vercel or other serverless hosts, replace the functions in `lib/db.ts` with a real database (Vercel Postgres, Supabase, Neon, etc.).
-- `SESSION_SECRET` must be set in production.
+- In the Vercel project, add a Neon Postgres database and a **private** Blob store (Storage tab). They set `DATABASE_URL` and `BLOB_READ_WRITE_TOKEN`.
+- `SESSION_SECRET` must be set in production (Settings → Environment Variables).
 - Prices in `lib/catalog.ts` are placeholders. Update them to the shop's real pricing.
-- Staff currently find print files under `data/designs/<id>/` (`<side>-print.png`). An admin page for orders and artwork is a good next step.
+- Staff currently find print files in the Blob store under `designs/<id>/` (`<side>-print.png`). An admin page for orders and artwork is a good next step.

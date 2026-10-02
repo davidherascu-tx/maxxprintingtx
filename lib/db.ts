@@ -1,11 +1,10 @@
 import "server-only";
-import { promises as fs } from "node:fs";
-import path from "node:path";
+import { neon } from "@neondatabase/serverless";
 import { randomUUID } from "node:crypto";
 
-// Simple JSON file store for local development / single-server hosting.
-// Swap these functions for a real database (Postgres, etc.) before deploying
-// to a serverless host, where the filesystem is read-only.
+// Postgres store (Neon). Needs DATABASE_URL, which the Neon integration sets on
+// the Vercel project; run `vercel env pull .env.local` for local dev.
+// Tables are created on first use, so there's no separate migration step.
 
 export type User = {
   id: string;
@@ -49,103 +48,167 @@ export type Order = {
   createdAt: string;
 };
 
-type Data = { users: User[]; orders: Order[]; designs: Design[] };
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Row = Record<string, any>;
 
-const file = path.join(process.cwd(), "data", "db.json");
+let client: ReturnType<typeof neon> | undefined;
+let ready: Promise<unknown> | undefined;
 
-async function load(): Promise<Data> {
-  try {
-    return { users: [], orders: [], designs: [], ...JSON.parse(await fs.readFile(file, "utf8")) } as Data;
-  } catch {
-    return { users: [], orders: [], designs: [] };
+/** Run a query once the schema exists. Connects lazily so builds don't need DATABASE_URL. */
+async function sql(strings: TemplateStringsArray, ...values: unknown[]): Promise<Row[]> {
+  if (!client) {
+    const url = process.env.DATABASE_URL;
+    if (!url) throw new Error("DATABASE_URL must be set");
+    client = neon(url);
   }
+  ready ??= migrate(client).catch((e) => {
+    ready = undefined;
+    throw e;
+  });
+  await ready;
+  return (await client(strings, ...values)) as Row[];
 }
 
-// Serialize writes so concurrent requests don't clobber each other.
-let queue: Promise<unknown> = Promise.resolve();
-function mutate<T>(fn: (data: Data) => T): Promise<T> {
-  const run = queue.then(async () => {
-    const data = await load();
-    const result = fn(data);
-    await fs.mkdir(path.dirname(file), { recursive: true });
-    await fs.writeFile(file, JSON.stringify(data, null, 2));
-    return result;
-  });
-  queue = run.catch(() => {});
-  return run;
+async function migrate(db: ReturnType<typeof neon>) {
+  await db`CREATE TABLE IF NOT EXISTS users (
+    id uuid PRIMARY KEY,
+    name text NOT NULL,
+    email text NOT NULL UNIQUE,
+    password_hash text NOT NULL,
+    phone text,
+    company text,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`;
+  await db`CREATE TABLE IF NOT EXISTS designs (
+    id uuid PRIMARY KEY,
+    user_id uuid REFERENCES users(id),
+    slug text NOT NULL,
+    variant text NOT NULL,
+    sides text[] NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`;
+  await db`CREATE SEQUENCE IF NOT EXISTS order_number_seq START 1001`;
+  await db`CREATE TABLE IF NOT EXISTS orders (
+    id uuid PRIMARY KEY,
+    number text NOT NULL UNIQUE,
+    user_id uuid NOT NULL REFERENCES users(id),
+    items jsonb NOT NULL,
+    subtotal numeric NOT NULL,
+    notes text NOT NULL DEFAULT '',
+    fulfillment text NOT NULL,
+    address text,
+    status text NOT NULL DEFAULT 'Received',
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`;
+  await db`CREATE INDEX IF NOT EXISTS orders_user_idx ON orders (user_id)`;
+  await db`CREATE INDEX IF NOT EXISTS designs_user_idx ON designs (user_id)`;
 }
+
+const iso = (d: Date | string) => new Date(d).toISOString();
+
+const toUser = (r: Row): User => ({
+  id: r.id,
+  name: r.name,
+  email: r.email,
+  passwordHash: r.password_hash,
+  phone: r.phone ?? undefined,
+  company: r.company ?? undefined,
+  createdAt: iso(r.created_at),
+});
+
+const toDesign = (r: Row): Design => ({
+  id: r.id,
+  userId: r.user_id,
+  slug: r.slug,
+  variant: r.variant,
+  sides: r.sides,
+  createdAt: iso(r.created_at),
+});
+
+const toOrder = (r: Row): Order => ({
+  id: r.id,
+  number: r.number,
+  userId: r.user_id,
+  items: r.items,
+  subtotal: Number(r.subtotal),
+  notes: r.notes,
+  fulfillment: r.fulfillment,
+  address: r.address ?? undefined,
+  status: r.status,
+  createdAt: iso(r.created_at),
+});
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function findUserByEmail(email: string) {
-  const { users } = await load();
-  return users.find((u) => u.email === email.toLowerCase());
+  const [row] = await sql`SELECT * FROM users WHERE email = ${email.toLowerCase()}`;
+  return row ? toUser(row) : undefined;
 }
 
 export async function findUserById(id: string) {
-  const { users } = await load();
-  return users.find((u) => u.id === id);
+  if (!UUID.test(id)) return undefined;
+  const [row] = await sql`SELECT * FROM users WHERE id = ${id}`;
+  return row ? toUser(row) : undefined;
 }
 
-export function createUser(input: Omit<User, "id" | "createdAt">) {
-  return mutate((data) => {
-    if (data.users.some((u) => u.email === input.email)) return null;
-    const user: User = { ...input, id: randomUUID(), createdAt: new Date().toISOString() };
-    data.users.push(user);
-    return user;
-  });
+/** Returns null if the email is already registered. */
+export async function createUser(input: Omit<User, "id" | "createdAt">) {
+  const [row] = await sql`
+    INSERT INTO users (id, name, email, password_hash, phone, company)
+    VALUES (${randomUUID()}, ${input.name}, ${input.email}, ${input.passwordHash}, ${input.phone ?? null}, ${input.company ?? null})
+    ON CONFLICT (email) DO NOTHING
+    RETURNING *`;
+  return row ? toUser(row) : null;
 }
 
-export function updateUser(id: string, patch: Partial<Pick<User, "name" | "phone" | "company">>) {
-  return mutate((data) => {
-    const user = data.users.find((u) => u.id === id);
-    if (user) Object.assign(user, patch);
-    return user;
-  });
+export async function updateUser(id: string, patch: Partial<Pick<User, "name" | "phone" | "company">>) {
+  const [row] = await sql`
+    UPDATE users SET
+      name = COALESCE(${patch.name ?? null}, name),
+      phone = ${patch.phone ?? null},
+      company = ${patch.company ?? null}
+    WHERE id = ${id}
+    RETURNING *`;
+  return row ? toUser(row) : undefined;
 }
 
 export async function ordersForUser(userId: string) {
-  const { orders } = await load();
-  return orders
-    .filter((o) => o.userId === userId)
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const rows = await sql`SELECT * FROM orders WHERE user_id = ${userId} ORDER BY created_at DESC`;
+  return rows.map(toOrder);
 }
 
-export function createOrder(input: Omit<Order, "id" | "number" | "status" | "createdAt">) {
-  return mutate((data) => {
-    const order: Order = {
-      ...input,
-      id: randomUUID(),
-      number: `MX-${String(1001 + data.orders.length)}`,
-      status: "Received",
-      createdAt: new Date().toISOString(),
-    };
-    data.orders.push(order);
-    return order;
-  });
+export async function createOrder(input: Omit<Order, "id" | "number" | "status" | "createdAt">) {
+  const [row] = await sql`
+    INSERT INTO orders (id, number, user_id, items, subtotal, notes, fulfillment, address)
+    VALUES (
+      ${randomUUID()}, 'MX-' || nextval('order_number_seq'), ${input.userId}, ${JSON.stringify(input.items)}::jsonb,
+      ${input.subtotal}, ${input.notes}, ${input.fulfillment}, ${input.address ?? null}
+    )
+    RETURNING *`;
+  return toOrder(row);
 }
 
 export async function findDesign(id: string) {
-  const { designs } = await load();
-  return designs.find((d) => d.id === id);
+  if (!UUID.test(id)) return undefined;
+  const [row] = await sql`SELECT * FROM designs WHERE id = ${id}`;
+  return row ? toDesign(row) : undefined;
 }
 
 export async function designsForUser(userId: string) {
-  const { designs } = await load();
-  return designs
-    .filter((d) => d.userId === userId)
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const rows = await sql`SELECT * FROM designs WHERE user_id = ${userId} ORDER BY created_at DESC`;
+  return rows.map(toDesign);
 }
 
-export function createDesign(input: Omit<Design, "createdAt">) {
-  return mutate((data) => {
-    const design: Design = { ...input, createdAt: new Date().toISOString() };
-    data.designs.push(design);
-    return design;
-  });
+export async function createDesign(input: Omit<Design, "createdAt">) {
+  const [row] = await sql`
+    INSERT INTO designs (id, user_id, slug, variant, sides)
+    VALUES (${input.id}, ${input.userId}, ${input.slug}, ${input.variant}, ${input.sides})
+    RETURNING *`;
+  return toDesign(row);
 }
 
 /** Attach anonymous designs to a user (e.g. when they sign in to check out). */
-export function claimDesigns(ids: string[], userId: string) {
-  return mutate((data) => {
-    for (const d of data.designs) if (ids.includes(d.id) && d.userId === null) d.userId = userId;
-  });
+export async function claimDesigns(ids: string[], userId: string) {
+  const valid = ids.filter((id) => UUID.test(id));
+  if (valid.length) await sql`UPDATE designs SET user_id = ${userId} WHERE id = ANY(${valid}::uuid[]) AND user_id IS NULL`;
 }
