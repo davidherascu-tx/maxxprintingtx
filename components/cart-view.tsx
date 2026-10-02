@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { formatPrice, getProduct } from "@/lib/catalog";
+import { colorOf, formatPrice, getProduct } from "@/lib/catalog";
 import { linePrice, useCart } from "./cart";
 
 export function CartView() {
@@ -25,14 +25,16 @@ export function CartView() {
         {lines.map((line) => {
           const product = getProduct(line.slug)!;
           const variant = product.variants.find((v) => v.id === line.variant);
+          const color = colorOf(product, line.color);
+          const image = color?.image ?? product.image;
           return (
-            <li key={`${line.slug}-${line.variant}-${line.designId ?? ""}`} className="flex gap-4 p-4">
+            <li key={`${line.slug}-${line.variant}-${line.color ?? ""}-${line.designId ?? ""}`} className="flex gap-4 p-4">
               <Link href={`/product/${product.slug}`} className="relative h-24 w-24 shrink-0 overflow-hidden rounded-xl bg-mist">
                 {line.preview ? (
                   // eslint-disable-next-line @next/next/no-img-element -- user design preview served by our API
                   <img src={line.preview} alt="Your design" className="absolute inset-0 h-full w-full object-contain p-1" />
-                ) : product.image ? (
-                  <Image src={product.image} alt="" fill sizes="96px" className="object-contain p-2" />
+                ) : image ? (
+                  <Image src={image} alt="" fill sizes="96px" className="object-contain p-2" />
                 ) : (
                   <span className="absolute inset-0 bg-gradient-to-br from-navy to-navy-700" />
                 )}
@@ -42,6 +44,7 @@ export function CartView() {
                   <div className="min-w-0">
                     <Link href={`/product/${product.slug}`} className="font-semibold hover:text-navy">{product.name}</Link>
                     <p className="text-sm text-ink/60">
+                      {color && `Color: ${color.label} · `}
                       {product.variantLabel}: {variant?.label}
                     </p>
                     {line.designId && (
@@ -53,11 +56,13 @@ export function CartView() {
                   <span className="font-semibold text-navy">{formatPrice(linePrice(line) * line.qty)}</span>
                 </div>
                 <div className="mt-auto flex items-center gap-4 pt-3">
-                  <div className="flex items-center rounded-full border border-line text-sm">
-                    <button className="h-8 w-8" onClick={() => setQty(line, line.qty - 1)} aria-label="Decrease">−</button>
-                    <span className="w-8 text-center">{line.qty}</span>
-                    <button className="h-8 w-8" onClick={() => setQty(line, line.qty + 1)} aria-label="Increase">+</button>
-                  </div>
+                  {!product.noQty && (
+                    <div className="flex items-center rounded-full border border-line text-sm">
+                      <button className="h-8 w-8" onClick={() => setQty(line, line.qty - 1)} aria-label="Decrease">−</button>
+                      <span className="w-8 text-center">{line.qty}</span>
+                      <button className="h-8 w-8" onClick={() => setQty(line, line.qty + 1)} aria-label="Increase">+</button>
+                    </div>
+                  )}
                   <button className="text-sm text-ink/50 hover:text-magenta" onClick={() => remove(line)}>
                     Remove
                   </button>
@@ -72,7 +77,7 @@ export function CartView() {
         <h2 className="font-semibold text-navy">Order summary</h2>
         <dl className="mt-4 space-y-2 text-sm">
           <div className="flex justify-between"><dt>Subtotal</dt><dd className="font-semibold">{formatPrice(subtotal)}</dd></div>
-          <div className="flex justify-between text-ink/60"><dt>Tax & delivery</dt><dd>Calculated on invoice</dd></div>
+          <div className="flex justify-between text-ink/60"><dt>Tax & delivery</dt><dd><Link href="/ordering" className="underline hover:text-navy">Calculated on invoice</Link></dd></div>
         </dl>
         <Link href="/checkout" className="btn-primary mt-6 w-full">Checkout</Link>
         <Link href="/shop" className="mt-3 block text-center text-sm text-navy hover:underline">Continue shopping</Link>

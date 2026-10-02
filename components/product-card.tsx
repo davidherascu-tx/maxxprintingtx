@@ -2,8 +2,18 @@ import Image from "next/image";
 import Link from "next/link";
 import { formatPrice, fromPrice, getCategory, type Product } from "@/lib/catalog";
 
-export function ProductImage({ product, sizes, priority }: { product: Product; sizes: string; priority?: boolean }) {
-  if (!product.image) {
+export function ProductImage({
+  product,
+  sizes,
+  priority,
+  src = product.image,
+}: {
+  product: Product;
+  sizes: string;
+  priority?: boolean;
+  src?: string | null;
+}) {
+  if (!src) {
     return (
       <div className="absolute inset-0 grid place-items-center bg-gradient-to-br from-navy to-navy-700 p-6 text-center">
         <div>
@@ -19,7 +29,7 @@ export function ProductImage({ product, sizes, priority }: { product: Product; s
   }
   return (
     <Image
-      src={product.image}
+      src={src}
       alt={product.name}
       fill
       sizes={sizes}
@@ -44,7 +54,11 @@ export function ProductCard({ product }: { product: Product }) {
         </span>
         <span className="font-semibold leading-snug text-ink">{product.name}</span>
         <span className="mt-auto pt-2 text-sm text-ink/60">
-          From <span className="font-semibold text-navy">{formatPrice(fromPrice(product))}</span>
+          {fromPrice(product) === null ? (
+                  "Price on request"
+                ) : (
+                  <>From <span className="font-semibold text-navy">{formatPrice(fromPrice(product)!)}</span></>
+                )}
         </span>
       </div>
     </Link>

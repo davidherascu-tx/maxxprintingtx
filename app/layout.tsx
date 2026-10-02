@@ -12,13 +12,14 @@ const display = Archivo_Black({ variable: "--font-archivo", weight: "400", subse
 export const metadata: Metadata = {
   title: { default: `${site.name} | Custom Printing in Houston, TX`, template: `%s | ${site.name}` },
   description:
-    "Yard signs, retractable banners, custom shirts, signage and trade show displays. Printed in Houston, TX by Maxx Marketing Agency.",
+    "Custom apparel, hats, stickers, yard signs and trade show displays. Printed in Houston, TX by Maxx Marketing Agency.",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en" className={`${inter.variable} ${display.variable} h-full antialiased`}>
-      <body className="min-h-full flex flex-col">
+      {/* Browser extensions (e.g. ColorZilla) add attributes to <body> before React loads */}
+      <body className="min-h-full flex flex-col" suppressHydrationWarning>
         <CartProvider>
           <Header />
           <main className="flex-1">{children}</main>

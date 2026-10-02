@@ -75,20 +75,22 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
                   </div>
                   <ul className="mt-3 space-y-1 text-sm text-ink/70">
                     {o.items.map((i) => (
-                      <li key={`${i.slug}-${i.variant}-${i.designId ?? ""}`} className="flex items-center justify-between gap-3">
+                      <li key={`${i.slug}-${i.variant}-${i.color ?? ""}-${i.designId ?? ""}`} className="flex items-center justify-between gap-3">
                         <span className="flex items-center gap-3">
                           {i.preview && (
                             // eslint-disable-next-line @next/next/no-img-element -- user design preview served by our API
                             <img src={i.preview} alt="Design" className="h-10 w-10 rounded-md bg-mist object-contain" />
                           )}
-                          {i.name} · {i.variant} × {i.qty}
+                          {i.name} · {i.color && `${i.color} · `}{i.variant} × {i.qty}
                         </span>
                         <span>{formatPrice(i.price * i.qty)}</span>
                       </li>
                     ))}
                   </ul>
                   <div className="mt-3 flex justify-between border-t border-line pt-3 text-sm">
-                    <span className="text-ink/60">{o.fulfillment === "pickup" ? "Store pickup" : "Local delivery"}</span>
+                    <span className="text-ink/60">
+                      {o.fulfillment === "pickup" ? "Store pickup" : "Local delivery · cost confirmed on invoice"}
+                    </span>
                     <span className="font-semibold text-navy">{formatPrice(o.subtotal)}</span>
                   </div>
                 </li>

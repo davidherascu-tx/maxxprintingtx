@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { claimDesigns, createOrder, createUser, findDesign, findUserByEmail, updateUser } from "./db";
 import { createSession, deleteSession, getCurrentUser, hashPassword, verifyPassword } from "./session";
-import { getProduct } from "./catalog";
+import { colorOf, getProduct } from "./catalog";
 
 export type FormState = { error?: string; ok?: string } | undefined;
 
@@ -71,7 +71,7 @@ export async function placeOrder(_: FormState, form: FormData): Promise<FormStat
   const user = await getCurrentUser();
   if (!user) redirect("/signin?next=/checkout");
 
-  let raw: { slug: string; variant: string; qty: number; designId?: string }[];
+  let raw: { slug: string; variant: string; color?: string; qty: number; designId?: string }[];
   try {
     raw = JSON.parse(String(form.get("cart") ?? "[]"));
     if (!Array.isArray(raw)) throw new Error();
@@ -85,8 +85,11 @@ export async function placeOrder(_: FormState, form: FormData): Promise<FormStat
       raw.map(async (line) => {
         const product = getProduct(line.slug);
         const variant = product?.variants.find((v) => v.id === line.variant);
-        const qty = Math.floor(Number(line.qty));
-        if (!product || !variant || !(qty >= 1 && qty <= 10000)) return null;
+        const qty = product?.noQty ? 1 : Math.floor(Number(line.qty));
+        if (!product || !variant || variant.price === null || !(qty >= 1 && qty <= 10000)) return null;
+        // Lines without a color (e.g. from the Design Studio) get the product's default color.
+        const color = colorOf(product, line.color);
+        if (line.color && color?.id !== line.color) return null;
         // A design must exist, be for this product, and not belong to someone else.
         const design = line.designId ? await findDesign(String(line.designId)) : undefined;
         if (line.designId && (!design || design.slug !== product.slug || (design.userId && design.userId !== user.id))) {
@@ -96,6 +99,7 @@ export async function placeOrder(_: FormState, form: FormData): Promise<FormStat
           slug: product.slug,
           name: product.name,
           variant: variant.label,
+          ...(color && { color: color.label }),
           price: variant.price,
           qty,
           ...(design && { designId: design.id, preview: `/api/designs/${design.id}/${design.sides[0]}-preview.png` }),

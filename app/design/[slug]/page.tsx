@@ -52,7 +52,14 @@ export default async function DesignStudioPage({
       </nav>
       <Studio
         key={design ?? "new"}
-        product={{ slug: product.slug, name: product.name, variants: product.variants, variantLabel: product.variantLabel }}
+        product={{
+          slug: product.slug,
+          name: product.name,
+          variants: product.variants,
+          variantLabel: product.variantLabel,
+          optionLabel: product.optionLabel,
+          noQty: product.noQty,
+        }}
         config={config}
         fonts={designFonts}
         initial={initial}

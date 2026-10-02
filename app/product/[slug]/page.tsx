@@ -2,7 +2,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getCategory, getProduct, products, productsIn } from "@/lib/catalog";
-import { ProductGrid, ProductImage } from "@/components/product-card";
+import { ProductGrid } from "@/components/product-card";
+import { ColorImage, ColorProvider } from "@/components/product-color";
 import { AddToCart } from "@/components/add-to-cart";
 import { isDesignable } from "@/lib/design-config";
 
@@ -32,15 +33,22 @@ export default async function ProductPage({ params }: { params: Promise<{ slug: 
         <span className="text-ink/80">{product.name}</span>
       </nav>
 
-      <div className="grid gap-10 lg:grid-cols-2">
-        <div className="group relative aspect-square overflow-hidden rounded-3xl border border-line bg-mist">
-          <ProductImage product={product} sizes="(min-width: 1024px) 50vw, 100vw" priority />
-        </div>
+      <ColorProvider product={product}>
+        <div className="grid gap-10 lg:grid-cols-2">
+          <div className="group relative aspect-square overflow-hidden rounded-3xl border border-line bg-mist">
+            <ColorImage product={product} sizes="(min-width: 1024px) 50vw, 100vw" />
+          </div>
 
         <div>
           <span className="text-sm font-medium uppercase tracking-wider text-magenta">{category.name}</span>
           <h1 className="mt-2 font-display text-3xl text-navy sm:text-4xl">{product.name}</h1>
           <p className="mt-4 text-ink/70">{product.description}</p>
+          {product.more && (
+            <>
+              <h2 className="mt-5 font-semibold text-navy">{product.more.title}</h2>
+              <p className="mt-2 text-ink/70">{product.more.text}</p>
+            </>
+          )}
 
           {isDesignable(product) && (
             <Link
@@ -57,22 +65,36 @@ export default async function ProductPage({ params }: { params: Promise<{ slug: 
 
           <AddToCart product={product} />
 
-          <ul className="mt-8 space-y-2 border-t border-line pt-6 text-sm text-ink/70">
-            {product.features.map((f) => (
-              <li key={f} className="flex items-start gap-2">
-                <svg className="mt-0.5 shrink-0 text-cyan" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" aria-hidden>
-                  <path d="M5 12l5 5L20 7" />
-                </svg>
-                {f}
-              </li>
-            ))}
-          </ul>
+          {product.features.length > 0 && (
+            <div className="mt-8 border-t border-line pt-6">
+            {product.featuresTitle && <p className="mb-3 text-sm font-semibold text-navy">{product.featuresTitle}</p>}
+            <ul className="space-y-2 text-sm text-ink/70">
+              {product.features.map((f) => (
+                <li key={f} className="flex items-start gap-2">
+                  {f.startsWith("Processing time") ? (
+                    // Clock for turnaround time
+                    <svg className="mt-0.5 shrink-0 text-magenta" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
+                      <circle cx="12" cy="12" r="9" />
+                      <path d="M12 7v5l3 2" />
+                    </svg>
+                  ) : (
+                    <svg className="mt-0.5 shrink-0 text-cyan" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" aria-hidden>
+                      <path d="M5 12l5 5L20 7" />
+                    </svg>
+                  )}
+                  {f}
+                </li>
+              ))}
+            </ul>
+            </div>
+          )}
           <p className="mt-6 rounded-xl bg-mist p-4 text-sm text-ink/70">
             After you order, our team will reach out to collect your artwork and send a proof before printing.
             Bulk pricing available — <Link href="/contact" className="font-medium text-navy underline">contact us</Link>.
           </p>
         </div>
-      </div>
+        </div>
+      </ColorProvider>
 
       {related.length > 0 && (
         <section className="mt-20">

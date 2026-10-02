@@ -4,7 +4,7 @@ Next.js 16 (App Router) + React 19 + Tailwind CSS 4 storefront for Maxx Marketin
 
 ## Features
 
-- Categories: Yard Signs, Retractable Banners, Dress Shirts, Signage, T-Shirts, Trade Show
+- Categories: Apparel, Headwear, Stickers, Trade Show, Yard Signs
 - Product pages with size/package options, quantity and a cart (saved in the browser)
 - Sign up, sign in and sign out (scrypt password hashing, HMAC-signed httpOnly session cookie)
 - Account page with profile editing and order history

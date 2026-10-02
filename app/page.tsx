@@ -21,7 +21,7 @@ export default function Home() {
               Make your brand <span className="text-cyan">impossible</span> to miss.
             </h1>
             <p className="mt-5 max-w-lg text-lg text-white/75">
-              Yard signs, banners, custom apparel, signage and trade show displays — designed, printed and
+              Custom apparel, hats, stickers, yard signs and trade show displays — designed, printed and
               ready fast.
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
@@ -36,7 +36,7 @@ export default function Home() {
             <div className="cmyk-bar absolute -inset-2 rounded-3xl opacity-60 blur-2xl" />
             <div className="relative overflow-hidden rounded-3xl shadow-2xl">
               <Image
-                src="/products/1000053.png"
+                src="/products/yard-signs/1000053.png"
                 alt="Maxx Marketing yard sign"
                 width={500}
                 height={397}

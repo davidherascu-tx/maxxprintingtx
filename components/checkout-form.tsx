@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useActionState, useState } from "react";
 import { placeOrder } from "@/lib/actions";
-import { formatPrice, getProduct } from "@/lib/catalog";
+import { colorOf, formatPrice, getProduct } from "@/lib/catalog";
 import { linePrice, useCart } from "./cart";
 
 export function CheckoutForm() {
@@ -80,11 +80,13 @@ export function CheckoutForm() {
         <ul className="mt-4 space-y-3 text-sm">
           {lines.map((l) => {
             const p = getProduct(l.slug)!;
+            const color = colorOf(p, l.color);
             return (
-              <li key={`${l.slug}-${l.variant}-${l.designId ?? ""}`} className="flex justify-between gap-3">
+              <li key={`${l.slug}-${l.variant}-${l.color ?? ""}-${l.designId ?? ""}`} className="flex justify-between gap-3">
                 <span>
                   {p.name}
                   <span className="block text-ink/50">
+                    {color && `${color.label} · `}
                     {p.variants.find((v) => v.id === l.variant)?.label} × {l.qty}
                     {l.designId && " · custom design"}
                   </span>
@@ -98,8 +100,15 @@ export function CheckoutForm() {
           <span>Subtotal</span>
           <span>{formatPrice(subtotal)}</span>
         </div>
+        {fulfillment === "delivery" && (
+          <div className="mt-2 flex justify-between text-sm text-ink/60">
+            <span>Delivery</span>
+            <span>Quoted after you order</span>
+          </div>
+        )}
         <p className="mt-2 text-xs text-ink/50">
-          No payment is taken online. We&apos;ll confirm your proof and send an invoice before production.
+          No payment is taken online. We&apos;ll confirm your proof and send an invoice before production.{" "}
+          <Link href="/ordering" className="underline hover:text-navy">How it works</Link>
         </p>
         {state?.error && <p className="mt-4 rounded-lg bg-magenta/10 px-3 py-2 text-sm text-magenta">{state.error}</p>}
         <button type="submit" disabled={pending} className="btn-primary mt-6 w-full">

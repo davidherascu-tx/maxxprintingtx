@@ -66,41 +66,50 @@ const configs: Record<string, DesignConfig> = {
     kind: "flat",
     shape: "rect",
     sides: front,
-    dims: { "24x80": [24, 80], "33x80": [33, 80], "48x80": [48, 80] },
-    size: [33, 80],
+    dims: { "33.5x79": [33.5, 79] },
+    size: [33.5, 79],
   },
   // Dress Shirts
-  "camo-shirt": tee("/products/1000055.png", undefined, { x: 0.3, y: 0.25, w: 0.4, h: 0.48 }),
-  "shaka-wear-shirt": tee("/products/1000052.png", "/products/1000052-back.png", { x: 0.33, y: 0.21, w: 0.33, h: 0.38 }),
-  "gildan-shirt": tee("/products/1000020.png", "/products/1000020-back.png"),
-  "softstyle-womens-pique-polo": tee("/products/1000004.png", "/products/1000004-back.png", { x: 0.33, y: 0.24, w: 0.34, h: 0.48 }, 10),
+  "camo-shirt": tee("/products/apparel/1000055.png", undefined, { x: 0.3, y: 0.25, w: 0.4, h: 0.48 }),
+  "shaka-wear-shirt": tee("/products/apparel/1000052.png", "/products/apparel/1000052-back.png", { x: 0.33, y: 0.21, w: 0.33, h: 0.38 }),
+  "gildan-shirt": tee("/products/apparel/1000020.png", "/products/apparel/1000020-back.png"),
+  "softstyle-womens-pique-polo": tee("/products/apparel/1000004.png", "/products/apparel/1000004-back.png", { x: 0.33, y: 0.24, w: 0.34, h: 0.48 }, 10),
   // Signage
-  "die-cut-stickers": { kind: "flat", shape: "rect", sides: front, dims: {}, size: [3, 3], transparent: true, note: "Cut to the shape of your design." },
-  "composition-notebook-stickers": { kind: "flat", shape: "rect", sides: front, dims: {}, size: [4, 3] },
+  "die-cut-stickers": {
+    kind: "flat",
+    shape: "rect",
+    sides: front,
+    // "3x3-100" -> 3" x 3"
+    dims: Object.fromEntries(
+      (getProduct("die-cut-stickers")?.variants ?? []).map((v) => {
+        const n = Number(v.id.split("x")[0]);
+        return [v.id, [n, n] as [number, number]];
+      }),
+    ),
+    size: [3, 3],
+    transparent: true,
+    note: "Cut to the shape of your design.",
+  },
   "clear-stickers": { kind: "flat", shape: "rect", sides: front, dims: {}, size: [3, 3], transparent: true, note: "Printed on clear vinyl." },
   "circle-stickers": { kind: "flat", shape: "circle", sides: front, dims: {}, size: [3, 3] },
   "rectangle-stickers": { kind: "flat", shape: "rect", sides: front, dims: {}, size: [3, 2] },
   "business-cards": { kind: "flat", shape: "rect", sides: frontBack, dims: {}, size: [3.5, 2] },
   // T-Shirts
-  "senior-2027-custom-shirts": tee("/products/1000047.png", "/products/1000047-back.png"),
-  "heavyweight-tee": tee("/products/1000047.png", "/products/1000047-back.png"),
-  "softstyle-t-shirt": tee("/products/1000021.png", "/products/1000021-back.png"),
-  "softstyle-youth-t-shirt": tee("/products/1000022.png", "/products/1000022-back.png", undefined, 10),
-  "leopard-print-tee": tee("/products/1000054.png", undefined, { x: 0.3, y: 0.26, w: 0.42, h: 0.46 }),
-  "womens-micro-rib-baby-tee": tee("/products/1000046.png", "/products/1000046-back.png", { x: 0.36, y: 0.2, w: 0.28, h: 0.4 }, 9),
-  "long-sleeve-pocket-t-shirt": tee("/products/1000019.png", "/products/1000019-back.png", { x: 0.34, y: 0.24, w: 0.32, h: 0.48 }),
+  "senior-2027-custom-shirts": tee("/products/apparel/1000047.png", "/products/apparel/1000047-back.png"),
+  "heavyweight-tee": tee("/products/apparel/1000047.png", "/products/apparel/1000047-back.png"),
+  "softstyle-t-shirt": tee("/products/apparel/1000021.png", "/products/apparel/1000021-back.png"),
+  "softstyle-youth-t-shirt": tee("/products/apparel/1000022.png", "/products/apparel/1000022-back.png", undefined, 10),
+  "leopard-print-tee": tee("/products/apparel/1000054.png", undefined, { x: 0.3, y: 0.26, w: 0.42, h: 0.46 }),
+  "womens-micro-rib-baby-tee": tee("/products/apparel/1000046.png", "/products/apparel/1000046-back.png", { x: 0.36, y: 0.2, w: 0.28, h: 0.4 }, 9),
+  "long-sleeve-pocket-t-shirt": tee("/products/apparel/1000019.png", "/products/apparel/1000019-back.png", { x: 0.34, y: 0.24, w: 0.32, h: 0.48 }),
   // Trade Show
   "advertising-tent": {
     kind: "mockup",
-    sides: [{ id: "front", label: "Canopy", mockup: "/products/1000033.png", area: { x: 0.22, y: 0.25, w: 0.56, h: 0.17 }, widthIn: 120 }],
+    sides: [{ id: "front", label: "Canopy", mockup: "/products/trade-show/tent_black.png", area: { x: 0.22, y: 0.25, w: 0.56, h: 0.17 }, widthIn: 120 }],
   },
-  "table-covers-black": {
+  "table-covers": {
     kind: "mockup",
-    sides: [{ id: "front", label: "Front", mockup: "/products/1000034.png", area: { x: 0.2, y: 0.42, w: 0.6, h: 0.26 }, widthIn: 72 }],
-  },
-  "table-covers-grey": {
-    kind: "mockup",
-    sides: [{ id: "front", label: "Front", mockup: "/products/1000037.png", area: { x: 0.2, y: 0.42, w: 0.6, h: 0.26 }, widthIn: 72 }],
+    sides: [{ id: "front", label: "Front", mockup: "/products/trade-show/table_covers_black.png", area: { x: 0.2, y: 0.42, w: 0.6, h: 0.26 }, widthIn: 72 }],
   },
 };
 

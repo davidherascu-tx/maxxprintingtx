@@ -31,6 +31,7 @@ export type OrderItem = {
   preview?: string;
   name: string;
   variant: string;
+  color?: string;
   price: number;
   qty: number;
 };

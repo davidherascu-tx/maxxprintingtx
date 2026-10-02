@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { formatPrice, type Product } from "@/lib/catalog";
+import { formatPrice, fromPrice, type Product } from "@/lib/catalog";
+import { VariantPicker } from "@/components/variant-picker";
 import type { DesignConfig } from "@/lib/design-config";
 import type { DesignFont } from "@/lib/design-fonts";
 import { useCart } from "../cart";
@@ -18,7 +19,7 @@ const COLORS = [
 const MAX_UPLOAD = 20 * 1024 * 1024;
 
 export type StudioProps = {
-  product: Pick<Product, "slug" | "name" | "variants" | "variantLabel">;
+  product: Pick<Product, "slug" | "name" | "variants" | "variantLabel" | "optionLabel" | "noQty">;
   config: DesignConfig;
   fonts: DesignFont[];
   initial?: { variant: string; sides: Record<string, SideState> };
@@ -337,24 +338,8 @@ export function Studio({ product, config, fonts, initial, initialVariant }: Stud
                 <p className="text-sm font-semibold text-navy">{product.name}</p>
                 <Link href="/design" className="text-xs text-ink/50 hover:text-navy hover:underline">Change product</Link>
               </div>
-              {config.kind === "flat" && product.variants.length > 1 && (
-                <div>
-                  <span className="label">{product.variantLabel}</span>
-                  <div className="flex flex-wrap gap-2">
-                    {product.variants.map((v) => (
-                      <button
-                        key={v.id}
-                        type="button"
-                        onClick={() => changeVariant(v.id)}
-                        className={`rounded-lg border px-3 py-1.5 text-sm ${
-                          v.id === variant ? "border-navy bg-navy text-white" : "border-line hover:border-navy/40"
-                        }`}
-                      >
-                        {v.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
+              {config.kind === "flat" && (
+                <VariantPicker product={product} value={variant} onChange={changeVariant} compact />
               )}
               {config.kind === "flat" && !config.transparent && (
                 <div>
@@ -547,10 +532,10 @@ export function Studio({ product, config, fonts, initial, initialVariant }: Stud
         <div className="rounded-2xl bg-navy p-4 text-white">
           <p className="text-sm text-white/70">{product.name}</p>
           <p className="mt-1 text-2xl font-bold">
-            {formatPrice(Math.min(...product.variants.map((v) => v.price)))}
+            {formatPrice(fromPrice(product) ?? 0)}
             <span className="ml-1 text-sm font-normal text-white/60">and up</span>
           </p>
-          <button type="button" disabled={!ready || !!busy} onClick={() => setCheckout(true)} className="btn mt-4 w-full bg-magenta text-white hover:brightness-110">
+          <button type="button" disabled={!ready || !!busy} onClick={() => (product.noQty ? saveAndAdd([{ variant, qty: 1 }]) : setCheckout(true))} className="btn mt-4 w-full bg-magenta text-white hover:brightness-110">
             Add to cart
           </button>
           <p className="mt-2 text-xs text-white/60">We&apos;ll send a proof before anything prints.</p>
@@ -596,10 +581,10 @@ function QuantityDialog({
         <h2 className="font-display text-xl text-navy">{perSize ? "Choose sizes & quantities" : "How many?"}</h2>
         <p className="mt-1 text-sm text-ink/60">{product.name}</p>
         <div className={`mt-5 grid gap-3 ${perSize ? "grid-cols-3" : ""}`}>
-          {(perSize ? product.variants : product.variants.filter((v) => v.id === variant)).map((v) => (
+          {(perSize ? product.variants : product.variants.filter((v) => v.id === variant)).filter((v) => v.price !== null).map((v) => (
             <label key={v.id} className="block">
               <span className="mb-1 block text-xs font-medium text-ink/60">
-                {v.label} · {formatPrice(v.price)}
+                {v.label} · {formatPrice(v.price!)}
               </span>
               <input
                 type="number"

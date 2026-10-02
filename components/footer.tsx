@@ -31,6 +31,7 @@ export function Footer() {
             <li><Link href="/signup" className="hover:text-white">Create account</Link></li>
             <li><Link href="/account" className="hover:text-white">Order history</Link></li>
             <li><Link href="/cart" className="hover:text-white">Cart</Link></li>
+            <li><Link href="/ordering" className="hover:text-white">Ordering & delivery</Link></li>
           </ul>
         </div>
         <div>

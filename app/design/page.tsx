@@ -32,7 +32,7 @@ export default async function DesignSelectPage({ searchParams }: { searchParams:
 
       <div className="-mx-4 my-8 flex gap-2 overflow-x-auto px-4 pb-1 sm:mx-0 sm:flex-wrap sm:px-0">
         <Link href="/design" className={pill(!category)}>All</Link>
-        {categories.map((c) => (
+        {categories.filter((c) => designable.some((p) => p.category === c.slug)).map((c) => (
           <Link key={c.slug} href={`/design?category=${c.slug}`} className={pill(category === c.slug)}>
             {c.name}
           </Link>
@@ -55,7 +55,11 @@ export default async function DesignSelectPage({ searchParams }: { searchParams:
             <div className="flex flex-1 flex-col gap-1 p-4">
               <span className="font-semibold leading-snug">{p.name}</span>
               <span className="mt-auto pt-1 text-sm text-ink/60">
-                From <span className="font-semibold text-navy">{formatPrice(fromPrice(p))}</span>
+                {fromPrice(p) === null ? (
+                  "Price on request"
+                ) : (
+                  <>From <span className="font-semibold text-navy">{formatPrice(fromPrice(p)!)}</span></>
+                )}
               </span>
             </div>
           </Link>
