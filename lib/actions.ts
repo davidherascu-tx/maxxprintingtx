@@ -2,7 +2,8 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { claimDesigns, createOrder, createUser, findDesign, findUserByEmail, updateUser } from "./db";
+import { claimDesigns, createOrder, createUser, deleteDesign, findDesign, findUserByEmail, updateUser } from "./db";
+import { deleteDesignFiles } from "./files";
 import { createSession, deleteSession, getCurrentUser, hashPassword, verifyPassword } from "./session";
 import { colorOf, getProduct } from "./catalog";
 
@@ -65,6 +66,17 @@ export async function updateProfile(_: FormState, form: FormData): Promise<FormS
   });
   revalidatePath("/account");
   return { ok: "Profile saved." };
+}
+
+export async function removeDesign(id: string): Promise<FormState> {
+  const user = await getCurrentUser();
+  if (!user) redirect("/signin");
+  const result = await deleteDesign(id, user.id);
+  if (!result) return { error: "That design could not be found." };
+  // The row is already gone, so a failed file cleanup only leaves orphaned blobs behind.
+  if (result.removed) await deleteDesignFiles(id).catch((e) => console.error("Failed to delete design files", id, e));
+  revalidatePath("/account");
+  return { ok: "Design deleted." };
 }
 
 export async function placeOrder(_: FormState, form: FormData): Promise<FormState> {

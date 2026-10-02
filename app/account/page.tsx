@@ -7,6 +7,7 @@ import { signOut } from "@/lib/actions";
 import { formatPrice, getProduct } from "@/lib/catalog";
 import { ProfileForm } from "@/components/auth-forms";
 import { ClearCart } from "@/components/clear-cart";
+import { DeleteDesignButton } from "@/components/delete-design-button";
 
 export const metadata: Metadata = { title: "My account" };
 
@@ -113,9 +114,12 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
                   <div className="p-3">
                     <p className="truncate text-sm font-medium">{getProduct(d.slug)?.name}</p>
                     <p className="text-xs text-ink/50">{new Date(d.createdAt).toLocaleDateString("en-US", { dateStyle: "medium" })}</p>
-                    <Link href={`/design/${d.slug}?design=${d.id}`} className="mt-2 inline-block text-sm font-semibold text-navy hover:underline">
-                      Edit & reorder →
-                    </Link>
+                    <div className="mt-2 flex items-center justify-between gap-2">
+                      <Link href={`/design/${d.slug}?design=${d.id}`} className="text-sm font-semibold text-navy hover:underline">
+                        Edit & reorder →
+                      </Link>
+                      <DeleteDesignButton id={d.id} />
+                    </div>
                   </div>
                 </li>
               ))}

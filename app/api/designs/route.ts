@@ -51,9 +51,14 @@ export async function POST(request: Request) {
   const id = randomUUID();
   const user = await getCurrentUser();
   const json = Object.fromEntries(sides.map((s) => [s, meta.sides[s]]));
-  await saveDesignFile(id, "design.json", JSON.stringify({ slug: meta.slug, variant: meta.variant, sides: json }));
-  await Promise.all(files.map(([name, bytes]) => saveDesignFile(id, name, bytes)));
-  await createDesign({ id, userId: user?.id ?? null, slug: meta.slug, variant: meta.variant, sides });
+  try {
+    await saveDesignFile(id, "design.json", JSON.stringify({ slug: meta.slug, variant: meta.variant, sides: json }));
+    await Promise.all(files.map(([name, bytes]) => saveDesignFile(id, name, bytes)));
+    await createDesign({ id, userId: user?.id ?? null, slug: meta.slug, variant: meta.variant, sides });
+  } catch (e) {
+    console.error("Failed to save design", e);
+    return bad("We couldn't save your design right now. Please try again.", 500);
+  }
 
   return Response.json({ id, sides });
 }

@@ -1,5 +1,5 @@
 import "server-only";
-import { get, put } from "@vercel/blob";
+import { del, get, list, put } from "@vercel/blob";
 
 // Uploaded artwork and rendered design files, stored in a private Vercel Blob store.
 // Needs BLOB_READ_WRITE_TOKEN (set automatically when a Blob store is connected
@@ -51,4 +51,10 @@ export async function saveDesignFile(id: string, name: string, bytes: Buffer | s
 export async function readDesignFile(id: string, name: string) {
   if (!isId(id) || !isDesignFile(name)) return null;
   return (await read(`designs/${id}/${name}`))?.bytes ?? null;
+}
+
+export async function deleteDesignFiles(id: string) {
+  if (!isId(id)) return;
+  const { blobs } = await list({ prefix: `designs/${id}/` });
+  if (blobs.length) await del(blobs.map((b) => b.url));
 }

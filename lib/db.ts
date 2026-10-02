@@ -103,6 +103,8 @@ async function migrate(db: ReturnType<typeof neon>) {
   )`;
   await db`CREATE INDEX IF NOT EXISTS orders_user_idx ON orders (user_id)`;
   await db`CREATE INDEX IF NOT EXISTS designs_user_idx ON designs (user_id)`;
+  // Set when a user deletes a design that an order still uses; such designs are hidden, not removed.
+  await db`ALTER TABLE designs ADD COLUMN IF NOT EXISTS deleted_at timestamptz`;
 }
 
 const iso = (d: Date | string) => new Date(d).toISOString();
@@ -196,7 +198,7 @@ export async function findDesign(id: string) {
 }
 
 export async function designsForUser(userId: string) {
-  const rows = await sql`SELECT * FROM designs WHERE user_id = ${userId} ORDER BY created_at DESC`;
+  const rows = await sql`SELECT * FROM designs WHERE user_id = ${userId} AND deleted_at IS NULL ORDER BY created_at DESC`;
   return rows.map(toDesign);
 }
 
@@ -212,4 +214,21 @@ export async function createDesign(input: Omit<Design, "createdAt">) {
 export async function claimDesigns(ids: string[], userId: string) {
   const valid = ids.filter((id) => UUID.test(id));
   if (valid.length) await sql`UPDATE designs SET user_id = ${userId} WHERE id = ANY(${valid}::uuid[]) AND user_id IS NULL`;
+}
+
+/**
+ * Delete one of a user's designs. A design an order still uses is only hidden, so the
+ * order keeps its preview and print files. Returns null if the user doesn't own it;
+ * `removed` says whether the row is gone (and its files can be deleted too).
+ */
+export async function deleteDesign(id: string, userId: string) {
+  if (!UUID.test(id)) return null;
+  const used = JSON.stringify([{ designId: id }]);
+  const [removed] = await sql`
+    DELETE FROM designs WHERE id = ${id} AND user_id = ${userId}
+      AND NOT EXISTS (SELECT 1 FROM orders WHERE items @> ${used}::jsonb)
+    RETURNING id`;
+  if (removed) return { removed: true };
+  const [hidden] = await sql`UPDATE designs SET deleted_at = now() WHERE id = ${id} AND user_id = ${userId} RETURNING id`;
+  return hidden ? { removed: false } : null;
 }

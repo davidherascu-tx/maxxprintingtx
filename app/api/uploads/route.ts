@@ -23,6 +23,11 @@ export async function POST(request: Request) {
   }
 
   const id = randomUUID();
-  await saveUpload(id, type, bytes);
+  try {
+    await saveUpload(id, type, bytes);
+  } catch (e) {
+    console.error("Failed to save upload", e);
+    return Response.json({ error: "We couldn't upload your image right now. Please try again." }, { status: 500 });
+  }
   return Response.json({ id, url: `/api/uploads/${id}` });
 }

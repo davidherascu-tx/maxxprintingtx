@@ -174,7 +174,7 @@ export function Studio({ product, config, fonts, initial, initialVariant }: Stud
       const body = new FormData();
       body.append("file", file);
       const res = await fetch("/api/uploads", { method: "POST", body });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error ?? "Upload failed.");
       await engineRef.current?.addImage(data.url);
     } catch (err) {
@@ -211,7 +211,7 @@ export function Studio({ product, config, fonts, initial, initialVariant }: Stud
         JSON.stringify({ slug: product.slug, variant, sides: Object.fromEntries(used.map((id) => [id, sidesRef.current[id]])) }),
       );
       const res = await fetch("/api/designs", { method: "POST", body });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error ?? "Could not save your design.");
 
       const preview = `/api/designs/${data.id}/${used[0]}-preview.png`;
@@ -229,7 +229,9 @@ export function Studio({ product, config, fonts, initial, initialVariant }: Stud
   const activeFont = fonts.find((f) => f.family === sel?.fontFamily);
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[19rem_1fr_17rem] lg:gap-6">
+    // A form with autoComplete off stops Firefox restoring controls' disabled state on reload,
+    // which would break hydration. Nothing here submits.
+    <form autoComplete="off" onSubmit={(ev) => ev.preventDefault()} className="grid gap-4 lg:grid-cols-[19rem_1fr_17rem] lg:gap-6">
       {/* Tools */}
       <aside className="order-2 rounded-2xl border border-line bg-white lg:order-1">
         <div className="grid grid-cols-4 border-b border-line text-xs font-semibold">
@@ -554,7 +556,7 @@ export function Studio({ product, config, fonts, initial, initialVariant }: Stud
           }}
         />
       )}
-    </div>
+    </form>
   );
 }
 
