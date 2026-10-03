@@ -4,11 +4,14 @@
 // React component only deals with UI state.
 
 import type { Canvas, FabricImage, FabricObject, IText } from "fabric";
-import type { Area, DesignConfig } from "@/lib/design-config";
+import { CUT_MARGIN_IN, printSpec, type Area, type DesignConfig, type PrintSpec } from "@/lib/design-config";
+import { cutPathSvg } from "./contour";
+import { withPngDpi } from "./png";
 
 type FabricNS = typeof import("fabric");
 
-export type SideState = { objects: Record<string, unknown>[]; background?: string };
+/** `v: 2` states have coordinates measured on a canvas that includes the bleed zone. */
+export type SideState = { objects: Record<string, unknown>[]; background?: string; v?: number };
 export type Rect = { left: number; top: number; width: number; height: number };
 
 export type Selection =
@@ -27,13 +30,16 @@ export type Selection =
       charSpacing?: number;
       opacity: number;
       dpi?: number;
+      goodDpi?: number;
+      minDpi?: number;
     };
 
 const MOCKUP_SIZE = 600;
 const FLAT_LONG_SIDE = 600;
 const PAD = 24;
-const PRINT_DPI = 150;
-const MAX_PRINT_PX = 4000;
+const MAX_PRINT_PX = 12000;
+const MAX_PRINT_AREA = 36_000_000;
+const CUT_OFFSET_IN = 0.05;
 
 export class StudioEngine {
   canvas: Canvas;
@@ -41,7 +47,12 @@ export class StudioEngine {
   logical = { width: MOCKUP_SIZE, height: MOCKUP_SIZE };
   widthIn = 12;
   background = "#ffffff";
-  private guide: FabricObject | null = null;
+  /** Production rules for the current side and size. */
+  spec: PrintSpec;
+  /** Bleed zone width in logical pixels (0 when the product has none). */
+  bleedPx = 0;
+  private pxPerIn = 1;
+  private guides: FabricObject[] = [];
   private history = new Map<string, { stack: string[]; index: number }>();
   private side = "";
   private restoring = false;
@@ -53,6 +64,7 @@ export class StudioEngine {
     el: HTMLCanvasElement,
     private config: DesignConfig,
   ) {
+    this.spec = printSpec(config);
     Object.assign(f.InteractiveFabricObject.ownDefaults, {
       cornerStyle: "circle",
       cornerColor: "#ffffff",
@@ -92,12 +104,27 @@ export class StudioEngine {
     };
   }
 
-  /** Configure background, print area and guide for a side. */
+  private get round() {
+    return this.config.kind === "flat" && this.config.shape === "circle";
+  }
+
+  /** The product outline, grown by `grow` logical pixels on every side (negative shrinks it). */
+  private outline(grow: number, opts: Record<string, unknown>) {
+    const f = this.f;
+    const base = { left: this.area.left + this.area.width / 2, top: this.area.top + this.area.height / 2, ...opts };
+    return this.round
+      ? new f.Circle({ ...base, radius: Math.max(1, this.area.width / 2 + grow) })
+      : new f.Rect({ ...base, width: Math.max(1, this.area.width + grow * 2), height: Math.max(1, this.area.height + grow * 2) });
+  }
+
+  /** Configure background, print area and guides for a side. */
   async setupSide(sideId: string, dims: [number, number], background?: string) {
     const f = this.f;
     const c = this.canvas;
     this.side = sideId;
-    if (this.guide) c.remove(this.guide);
+    for (const g of this.guides) c.remove(g);
+    this.guides = [];
+    this.spec = printSpec(this.config, dims);
 
     if (this.config.kind === "mockup") {
       const side = this.config.sides.find((s) => s.id === sideId) ?? this.config.sides[0];
@@ -117,52 +144,63 @@ export class StudioEngine {
         height: h * s,
       });
       this.widthIn = side.widthIn;
+      this.pxPerIn = this.area.width / side.widthIn;
+      this.bleedPx = 0;
       this.background = this.sampleColor(img.getElement() as HTMLImageElement, side.area);
       c.backgroundImage = img;
     } else {
       const [wIn, hIn] = dims;
       const k = FLAT_LONG_SIDE / Math.max(wIn, hIn);
       const width = wIn * k, height = hIn * k;
-      this.logical = { width: width + PAD * 2, height: height + PAD * 2 };
-      this.area = { left: PAD, top: PAD, width, height };
+      this.pxPerIn = k;
+      this.bleedPx = this.spec.bleedIn * k;
+      const margin = PAD + this.bleedPx;
+      this.logical = { width: width + margin * 2, height: height + margin * 2 };
+      this.area = { left: margin, top: margin, width, height };
       this.widthIn = wIn;
       this.background = background ?? (this.config.transparent ? "transparent" : "#ffffff");
       c.backgroundImage = this.makeArtboard();
     }
 
-    const guideOpts = {
-      left: this.area.left + this.area.width / 2,
-      top: this.area.top + this.area.height / 2,
+    const line = {
       fill: "transparent",
-      stroke: "#00aeef",
-      strokeWidth: 1.5,
-      strokeDashArray: [6, 5],
       strokeUniform: true,
       selectable: false,
       evented: false,
       excludeFromExport: true,
       objectCaching: false,
     };
-    this.guide =
-      this.config.kind === "flat" && this.config.shape === "circle"
-        ? new f.Circle({ ...guideOpts, radius: this.area.width / 2 })
-        : new f.Rect({ ...guideOpts, width: this.area.width, height: this.area.height });
-    c.add(this.guide);
+    // Trim line: the finished size of the product.
+    this.guides.push(this.outline(0, { ...line, stroke: "#00aeef", strokeWidth: 1.5, strokeDashArray: [6, 5] }));
+    // Safe zone: keep text and logos inside this line.
+    const safe = this.spec.safeIn * this.pxPerIn;
+    if (safe > 0) this.guides.push(this.outline(-safe, { ...line, stroke: "#ec008c", strokeWidth: 1, strokeDashArray: [3, 4] }));
+    // Bleed zone: shaded strips around the trim line (rectangular products).
+    const bleed = this.bleedPx;
+    if (bleed > 0 && !this.round) {
+      const { left, top, width, height } = this.area;
+      const strip = (l: number, t: number, w: number, h: number) =>
+        new f.Rect({
+          left: l + w / 2, top: t + h / 2, width: w, height: h,
+          fill: "rgba(236,0,140,0.13)", selectable: false, evented: false, excludeFromExport: true, objectCaching: false,
+        });
+      this.guides.push(
+        strip(left - bleed, top - bleed, width + bleed * 2, bleed),
+        strip(left - bleed, top + height, width + bleed * 2, bleed),
+        strip(left - bleed, top, bleed, height),
+        strip(left + width, top, bleed, height),
+      );
+    }
+    for (const g of this.guides) c.add(g);
   }
 
   private makeArtboard(fill = this.background) {
-    const f = this.f;
-    const opts = {
-      left: this.area.left + this.area.width / 2,
-      top: this.area.top + this.area.height / 2,
+    return this.outline(this.bleedPx, {
       fill: fill === "transparent" ? this.checker() : fill,
-      shadow: new f.Shadow({ color: "rgba(2,36,91,0.18)", blur: 18, offsetY: 4 }),
+      shadow: new this.f.Shadow({ color: "rgba(2,36,91,0.18)", blur: 18, offsetY: 4 }),
       selectable: false,
       evented: false,
-    };
-    return this.config.kind === "flat" && this.config.shape === "circle"
-      ? new f.Circle({ ...opts, radius: this.area.width / 2 })
-      : new f.Rect({ ...opts, width: this.area.width, height: this.area.height });
+    });
   }
 
   private checker() {
@@ -195,28 +233,29 @@ export class StudioEngine {
 
   // ---------- objects ----------
 
+  /** Artwork is clipped to the bleed edge, so it can run past the trim line but no further. */
   private clipFor() {
-    const f = this.f;
-    const opts = {
-      left: this.area.left + this.area.width / 2,
-      top: this.area.top + this.area.height / 2,
-      absolutePositioned: true,
-    };
-    return this.config.kind === "flat" && this.config.shape === "circle"
-      ? new f.Circle({ ...opts, radius: this.area.width / 2 })
-      : new f.Rect({ ...opts, width: this.area.width, height: this.area.height });
+    return this.outline(this.bleedPx, { absolutePositioned: true });
+  }
+
+  private isGuide(o: FabricObject) {
+    return this.guides.includes(o);
+  }
+
+  private guidesToFront() {
+    for (const g of this.guides) this.canvas.bringObjectToFront(g);
   }
 
   private place(obj: FabricObject, select = true) {
     obj.clipPath = this.clipFor();
     this.canvas.add(obj);
-    if (this.guide) this.canvas.bringObjectToFront(this.guide);
+    this.guidesToFront();
     if (select) this.canvas.setActiveObject(obj);
     this.canvas.requestRenderAll();
   }
 
   userObjects() {
-    return this.canvas.getObjects().filter((o) => o !== this.guide);
+    return this.canvas.getObjects().filter((o) => !this.isGuide(o));
   }
 
   get center() {
@@ -335,7 +374,7 @@ export class StudioEngine {
     const obj = this.active;
     if (!obj) return;
     this.canvas.bringObjectForward(obj);
-    if (this.guide) this.canvas.bringObjectToFront(this.guide);
+    this.guidesToFront();
     this.canvas.requestRenderAll();
     this.commit();
   }
@@ -385,7 +424,13 @@ export class StudioEngine {
     if (obj instanceof this.f.FabricImage) {
       const el = obj.getElement() as HTMLImageElement;
       const inches = (obj.getScaledWidth() / this.area.width) * this.widthIn;
-      return { kind: "image", opacity, dpi: Math.round((el.naturalWidth || obj.width) / inches) };
+      return {
+        kind: "image",
+        opacity,
+        dpi: Math.round((el.naturalWidth || obj.width) / inches),
+        goodDpi: this.spec.goodDpi,
+        minDpi: this.spec.minDpi,
+      };
     }
     return { kind: "shape", fill: typeof obj.fill === "string" ? obj.fill : "#000000", opacity };
   }
@@ -410,7 +455,7 @@ export class StudioEngine {
       }
       return json;
     });
-    return this.config.kind === "flat" ? { objects, background: this.background } : { objects };
+    return this.config.kind === "flat" ? { objects, background: this.background, v: 2 } : { objects, v: 2 };
   }
 
   async restore(state: SideState | undefined) {
@@ -423,7 +468,12 @@ export class StudioEngine {
         this.background = state.background;
         c.backgroundImage = this.makeArtboard();
       }
-      const objs = await this.f.util.enlivenObjects<FabricObject>(state?.objects ?? []);
+      let saved = state?.objects ?? [];
+      // Designs saved before bleed existed were measured from the trim corner; shift them in.
+      if (state && state.v !== 2 && this.bleedPx > 0) {
+        saved = saved.map((o) => ({ ...o, left: (Number(o.left) || 0) + this.bleedPx, top: (Number(o.top) || 0) + this.bleedPx }));
+      }
+      const objs = await this.f.util.enlivenObjects<FabricObject>(saved);
       for (const o of objs) this.place(o, false);
       c.requestRenderAll();
     } finally {
@@ -505,6 +555,42 @@ export class StudioEngine {
     };
   }
 
+  // ---------- preflight ----------
+
+  /** Problems a print shop would otherwise find after the order: soft images, text near the edge, short bleed. */
+  preflight(): string[] {
+    const f = this.f;
+    const issues: string[] = [];
+    const { spec, area } = this;
+    const safe = spec.safeIn * this.pxPerIn;
+    const bleed = this.bleedPx;
+    const label = this.config.sides.length > 1 ? ` (${this.config.sides.find((s) => s.id === this.side)?.label})` : "";
+    let soft = 0, offSafe = 0, shortBleed = 0;
+
+    for (const o of this.userObjects()) {
+      const b = o.getBoundingRect();
+      if (o instanceof f.FabricImage) {
+        const el = o.getElement() as HTMLImageElement;
+        const dpi = (el.naturalWidth || o.width) / ((o.getScaledWidth() / area.width) * this.widthIn);
+        if (dpi < spec.minDpi) soft++;
+      }
+      if (safe > 0 && o instanceof f.IText) {
+        if (b.left < area.left + safe - 1 || b.top < area.top + safe - 1 || b.left + b.width > area.left + area.width - safe + 1 || b.top + b.height > area.top + area.height - safe + 1) {
+          offSafe++;
+        }
+      }
+      if (bleed > 0 && !this.round && !(o instanceof f.IText) && b.width > area.width * 0.5 && b.height > area.height * 0.5) {
+        // A background that ends near the trim line leaves a white sliver once the sheet is cut.
+        const gaps = [b.left - area.left, b.top - area.top, area.left + area.width - (b.left + b.width), area.top + area.height - (b.top + b.height)];
+        if (gaps.some((g) => g > -bleed * 0.9 && g < bleed * 0.75 + 1 && Math.abs(g) < bleed * 4)) shortBleed++;
+      }
+    }
+    if (soft) issues.push(`${soft === 1 ? "An image is" : `${soft} images are`} below ${spec.minDpi} DPI at this size and will print soft${label}.`);
+    if (offSafe) issues.push(`Text is outside the safe zone (pink dashed line) and may be trimmed off${label}.`);
+    if (shortBleed) issues.push(`Artwork stops near the trim line. Stretch it to the outer edge of the pink bleed zone to avoid white borders${label}.`);
+    return issues;
+  }
+
   // ---------- export ----------
 
   private async blob(el: HTMLCanvasElement) {
@@ -513,12 +599,16 @@ export class StudioEngine {
     );
   }
 
-  /** Render the current side to a mockup preview and a print-ready file. */
-  async export() {
+  /**
+   * Render the current side to a mockup preview and a print-ready file. The print file has no
+   * mockup, includes the bleed, and is written at the product's print DPI. Contour-cut
+   * products also get a vector cut path aligned to the print file.
+   */
+  async export(scale = 1) {
     const c = this.canvas;
     c.discardActiveObject();
     const z = c.getZoom();
-    const notGuide = (o: object) => o !== this.guide;
+    const notGuide = (o: object) => !this.guides.includes(o as FabricObject);
 
     const isFlat = this.config.kind === "flat";
     const crop = isFlat
@@ -527,18 +617,39 @@ export class StudioEngine {
     const previewPx = 800;
     const preview = c.toCanvasElement(previewPx / Math.max(crop.width, crop.height), { ...crop, filter: notGuide });
 
-    // Print file: print area only, no mockup, at ~150 DPI.
+    // Print file: print area plus bleed, no mockup. Contour-cut files keep a small transparent margin.
+    const { spec } = this;
+    const marginPx = this.bleedPx || (spec.cut ? CUT_MARGIN_IN * this.pxPerIn : 0);
+    const marginIn = marginPx / this.pxPerIn;
+    const heightIn = (this.widthIn * this.area.height) / this.area.width;
+    const sizeIn = { width: this.widthIn + marginIn * 2, height: heightIn + marginIn * 2 };
+
     const bg = c.backgroundImage;
     const transparentPrint = !isFlat || this.background === "transparent";
     c.backgroundImage = transparentPrint ? undefined : this.makeArtboard();
     if (c.backgroundImage) c.backgroundImage.shadow = null;
-    const long = Math.max(this.widthIn, (this.widthIn * this.area.height) / this.area.width);
-    const printPx = Math.min(MAX_PRINT_PX, long * PRINT_DPI);
-    const area = { left: this.area.left * z, top: this.area.top * z, width: this.area.width * z, height: this.area.height * z };
-    const print = c.toCanvasElement(printPx / Math.max(area.width, area.height), { ...area, filter: notGuide });
-    c.backgroundImage = bg;
-    c.requestRenderAll();
 
-    return { preview: await this.blob(preview), print: await this.blob(print) };
+    const longIn = Math.max(sizeIn.width, sizeIn.height);
+    const aspect = sizeIn.width / sizeIn.height;
+    const maxLong = Math.min(MAX_PRINT_PX, Math.sqrt(MAX_PRINT_AREA * Math.max(aspect, 1 / aspect)));
+    const printPx = Math.min(maxLong, longIn * spec.dpi) * scale;
+    const dpi = Math.round(printPx / longIn);
+    const area = {
+      left: (this.area.left - marginPx) * z,
+      top: (this.area.top - marginPx) * z,
+      width: (this.area.width + marginPx * 2) * z,
+      height: (this.area.height + marginPx * 2) * z,
+    };
+    let printCanvas: HTMLCanvasElement;
+    try {
+      printCanvas = c.toCanvasElement(printPx / Math.max(area.width, area.height), { ...area, filter: notGuide });
+    } finally {
+      c.backgroundImage = bg;
+      c.requestRenderAll();
+    }
+
+    const cut = spec.cut ? cutPathSvg(printCanvas, sizeIn, CUT_OFFSET_IN) : null;
+    const print = await withPngDpi(await this.blob(printCanvas), dpi);
+    return { preview: await this.blob(preview), print, cut, dpi };
   }
 }

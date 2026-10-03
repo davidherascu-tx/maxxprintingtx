@@ -1,17 +1,30 @@
 "use server";
 
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { claimDesigns, createOrder, createUser, deleteDesign, findDesign, findUserByEmail, updateUser } from "./db";
+import {
+  claimDesigns, createOrder, createUser, deleteDesign, deleteUnpaidOrder, findDesign, findOrder, findUserByEmail,
+  ORDER_STATUSES, setOrderStatus, unpaidOrdersForUser, updateUser,
+} from "./db";
 import { deleteDesignFiles } from "./files";
-import { createSession, deleteSession, getCurrentUser, hashPassword, verifyPassword } from "./session";
+import { createSession, deleteSession, getCurrentUser, hashPassword, isAdmin, verifyPassword } from "./session";
 import { colorOf, getProduct } from "./catalog";
+import { expireSession, paymentsConfigured, startCheckout } from "./payments";
+import { calcTax } from "./tax";
 
 export type FormState = { error?: string; ok?: string } | undefined;
 
 const str = (f: FormData, k: string) => String(f.get(k) ?? "").trim();
 
 // Only allow redirecting back to paths on this site.
+const originOf = async () => {
+  const h = await headers();
+  const host = h.get("x-forwarded-host") ?? h.get("host") ?? "localhost:3000";
+  const proto = h.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
+  return `${proto}://${host}`;
+};
+
 const safeNext = (next: string) => (next.startsWith("/") && !next.startsWith("//") ? next : "/account");
 
 export async function signUp(_: FormState, form: FormData): Promise<FormState> {
@@ -131,15 +144,78 @@ export async function placeOrder(_: FormState, form: FormData): Promise<FormStat
     return { error: "Please enter a delivery address." };
   }
 
+  if (!paymentsConfigured()) {
+    return { error: "Online payments aren't available right now. Please call us to place your order." };
+  }
+  await discardUnpaidOrders(user.id);
+
+  const subtotal = items.reduce((sum, i) => sum + i.price * i.qty, 0);
   const order = await createOrder({
     userId: user.id,
     items,
-    subtotal: items.reduce((sum, i) => sum + i.price * i.qty, 0),
+    subtotal,
+    tax: calcTax(subtotal),
     notes: str(form, "notes").slice(0, 2000),
     fulfillment,
     address: fulfillment === "delivery" ? address : undefined,
   });
 
+  let url: string;
+  try {
+    url = await startCheckout(order, user.email, await originOf());
+  } catch (e) {
+    console.error("Failed to start checkout", e);
+    await deleteUnpaidOrder(order.id);
+    return { error: "We couldn't start the payment. Please try again." };
+  }
   revalidatePath("/account");
-  redirect(`/account?order=${order.number}`);
+  redirect(url);
+}
+
+/** A customer's earlier unpaid attempts are replaced by the new one (never a paid or in-flight one). */
+async function discardUnpaidOrders(userId: string) {
+  for (const old of await unpaidOrdersForUser(userId)) {
+    try {
+      if (!old.stripeSessionId || (await expireSession(old.stripeSessionId))) await deleteUnpaidOrder(old.id);
+    } catch (e) {
+      console.error("Could not discard unpaid order", old.number, e);
+    }
+  }
+}
+
+/** Pay for an order that was saved but not paid (e.g. the customer left the payment page). */
+export async function payOrder(form: FormData) {
+  const user = await getCurrentUser();
+  if (!user) redirect("/signin");
+  const order = await findOrder(str(form, "id"));
+  if (!order || order.userId !== user.id || order.paymentStatus !== "unpaid" || !paymentsConfigured()) redirect("/account");
+  // If the earlier checkout was actually completed, confirm it instead of charging twice.
+  let completed = false;
+  if (order.stripeSessionId) {
+    try {
+      completed = !(await expireSession(order.stripeSessionId));
+    } catch (e) {
+      console.error("Could not check earlier checkout", e);
+    }
+  }
+  if (completed) redirect(`/account?order=${order.number}&session_id=${order.stripeSessionId}`);
+
+  let url: string | undefined;
+  try {
+    url = await startCheckout(order, user.email, await originOf());
+  } catch (e) {
+    console.error("Failed to start checkout", e);
+  }
+  if (!url) redirect("/account?payment_error=1");
+  redirect(url);
+}
+
+export async function updateOrderStatus(form: FormData) {
+  const user = await getCurrentUser();
+  if (!isAdmin(user)) redirect("/");
+  const status = ORDER_STATUSES.find((s) => s === str(form, "status"));
+  if (!status) return;
+  await setOrderStatus(str(form, "id"), status);
+  revalidatePath("/admin");
+  revalidatePath("/account");
 }

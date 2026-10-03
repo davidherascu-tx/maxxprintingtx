@@ -80,3 +80,10 @@ export const getCurrentUser = cache(async () => {
   if (!user) return null;
   return { id: user.id, name: user.name, email: user.email, phone: user.phone, company: user.company, createdAt: user.createdAt };
 });
+
+/** Staff accounts are listed by email in ADMIN_EMAILS (comma-separated). */
+export function isAdmin(user: { email: string } | null) {
+  if (!user) return false;
+  const list = (process.env.ADMIN_EMAILS ?? "").split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
+  return list.includes(user.email.toLowerCase());
+}

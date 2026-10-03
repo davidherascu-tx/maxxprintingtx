@@ -3,6 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { colorOf, formatPrice, getProduct } from "@/lib/catalog";
+import { calcTax, TAX_LABEL } from "@/lib/tax";
 import { linePrice, useCart } from "./cart";
 
 export function CartView() {
@@ -77,7 +78,9 @@ export function CartView() {
         <h2 className="font-semibold text-navy">Order summary</h2>
         <dl className="mt-4 space-y-2 text-sm">
           <div className="flex justify-between"><dt>Subtotal</dt><dd className="font-semibold">{formatPrice(subtotal)}</dd></div>
-          <div className="flex justify-between text-ink/60"><dt>Tax & delivery</dt><dd><Link href="/ordering" className="underline hover:text-navy">Calculated on invoice</Link></dd></div>
+          <div className="flex justify-between text-ink/60"><dt>Sales tax ({TAX_LABEL})</dt><dd>{formatPrice(calcTax(subtotal))}</dd></div>
+          <div className="flex justify-between border-t border-line pt-2 font-semibold text-navy"><dt>Total</dt><dd>{formatPrice(subtotal + calcTax(subtotal))}</dd></div>
+          <p className="text-xs text-ink/50">Local delivery is quoted separately. <Link href="/ordering" className="underline hover:text-navy">How it works</Link></p>
         </dl>
         <Link href="/checkout" className="btn-primary mt-6 w-full">Checkout</Link>
         <Link href="/shop" className="mt-3 block text-center text-sm text-navy hover:underline">Continue shopping</Link>

@@ -3,7 +3,8 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/session";
 import { designsForUser, ordersForUser } from "@/lib/db";
-import { signOut } from "@/lib/actions";
+import { payOrder, signOut } from "@/lib/actions";
+import { confirmCheckoutSession } from "@/lib/payments";
 import { formatPrice, getProduct } from "@/lib/catalog";
 import { ProfileForm } from "@/components/auth-forms";
 import { ClearCart } from "@/components/clear-cart";
@@ -18,15 +19,19 @@ const statusColor: Record<string, string> = {
   Completed: "bg-mist text-ink/60",
 };
 
-export default async function AccountPage({ searchParams }: { searchParams: Promise<{ order?: string }> }) {
+export default async function AccountPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ order?: string; session_id?: string; cancelled?: string; payment_error?: string }>;
+}) {
   const user = await getCurrentUser();
   if (!user) redirect("/signin");
-  const [{ order: placed }, orders, designs] = await Promise.all([
-    searchParams,
-    ordersForUser(user.id),
-    designsForUser(user.id),
-  ]);
-  const justPlaced = placed && orders.some((o) => o.number === placed) ? placed : null;
+  const { order: placed, session_id, cancelled, payment_error } = await searchParams;
+  // Back from Stripe: confirm the payment here too, in case the webhook is a moment behind.
+  if (session_id) await confirmCheckoutSession(session_id, user.id);
+  const [orders, designs] = await Promise.all([ordersForUser(user.id), designsForUser(user.id)]);
+  const justPlaced = placed && orders.some((o) => o.number === placed && o.paymentStatus === "paid") ? placed : null;
+  const unpaidPlaced = placed && !justPlaced && session_id ? orders.find((o) => o.number === placed && o.paymentStatus === "unpaid") : null;
 
   return (
     <div className="container-x py-12">
@@ -46,10 +51,22 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
       {justPlaced && (
         <div className="mt-8 rounded-2xl border border-cyan/40 bg-cyan/10 p-5 text-navy" role="status">
           <ClearCart />
-          <p className="font-semibold">Thank you! Order {justPlaced} has been received.</p>
+          <p className="font-semibold">Thank you! Payment received for order {justPlaced}.</p>
           <p className="mt-1 text-sm text-navy/80">
-            Our team will contact you shortly to confirm artwork, send a proof and arrange payment.
+            Our team will contact you shortly to confirm artwork and send a proof. Nothing prints until you approve it.
           </p>
+        </div>
+      )}
+      {unpaidPlaced && (
+        <div className="mt-8 rounded-2xl border border-yellow/60 bg-yellow/20 p-5 text-navy" role="status">
+          <p className="font-semibold">We&apos;re still confirming your payment for {unpaidPlaced.number}.</p>
+          <p className="mt-1 text-sm text-navy/80">Refresh this page in a moment. If it stays unpaid, use Pay now below.</p>
+        </div>
+      )}
+      {(cancelled || payment_error) && (
+        <div className="mt-8 rounded-2xl border border-line bg-mist p-5 text-navy" role="status">
+          <p className="font-semibold">{payment_error ? "We couldn't start the payment." : `Payment for ${cancelled} wasn't completed.`}</p>
+          <p className="mt-1 text-sm text-navy/80">Your order is saved. Use Pay now below when you&apos;re ready.</p>
         </div>
       )}
 
@@ -72,7 +89,11 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
                         {new Date(o.createdAt).toLocaleDateString("en-US", { dateStyle: "medium" })}
                       </span>
                     </div>
-                    <span className={`rounded-full px-3 py-1 text-xs font-semibold ${statusColor[o.status]}`}>{o.status}</span>
+                    {o.paymentStatus === "unpaid" ? (
+                      <span className="rounded-full bg-yellow/30 px-3 py-1 text-xs font-semibold text-navy">Awaiting payment</span>
+                    ) : (
+                      <span className={`rounded-full px-3 py-1 text-xs font-semibold ${statusColor[o.status]}`}>{o.status}</span>
+                    )}
                   </div>
                   <ul className="mt-3 space-y-1 text-sm text-ink/70">
                     {o.items.map((i) => (
@@ -90,10 +111,17 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
                   </ul>
                   <div className="mt-3 flex justify-between border-t border-line pt-3 text-sm">
                     <span className="text-ink/60">
-                      {o.fulfillment === "pickup" ? "Store pickup" : "Local delivery · cost confirmed on invoice"}
+                      {o.fulfillment === "pickup" ? "Store pickup" : "Local delivery · quoted separately"}
+                      {o.tax > 0 && ` · includes ${formatPrice(o.tax)} tax`}
                     </span>
-                    <span className="font-semibold text-navy">{formatPrice(o.subtotal)}</span>
+                    <span className="font-semibold text-navy">{formatPrice(o.subtotal + o.tax)}</span>
                   </div>
+                  {o.paymentStatus === "unpaid" && (
+                    <form action={payOrder} className="mt-3">
+                      <input type="hidden" name="id" value={o.id} />
+                      <button type="submit" className="btn-primary w-full">Pay now</button>
+                    </form>
+                  )}
                 </li>
               ))}
             </ul>

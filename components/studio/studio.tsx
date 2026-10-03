@@ -16,7 +16,9 @@ const COLORS = [
   "#000000", "#ffffff", "#02245b", "#1d4ed8", "#00aeef", "#0f766e", "#16a34a",
   "#facc15", "#ffd200", "#f97316", "#dc2626", "#ec008c", "#7c3aed", "#6b7280", "#b8860b",
 ];
-const MAX_UPLOAD = 20 * 1024 * 1024;
+const MAX_UPLOAD = 4 * 1024 * 1024;
+// A saved design goes up in one request, which must stay under 4.5 MB (hosting limit).
+const MAX_DESIGN_BYTES = 3.8 * 1000 * 1000;
 
 export type StudioProps = {
   product: Pick<Product, "slug" | "name" | "variants" | "variantLabel" | "optionLabel" | "noQty">;
@@ -48,6 +50,7 @@ export function Studio({ product, config, fonts, initial, initialVariant }: Stud
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [newText, setNewText] = useState("Your text here");
   const [checkout, setCheckout] = useState(false);
+  const [issues, setIssues] = useState<{ list: string[]; lines: { variant: string; qty: number }[] } | null>(null);
 
   const dims = useCallback(
     (v: string): [number, number] => (config.kind === "flat" ? (config.dims[v] ?? config.size) : [1, 1]),
@@ -168,7 +171,7 @@ export function Studio({ product, config, fonts, initial, initialVariant }: Stud
   async function upload(file: File) {
     setError(null);
     if (!/^image\/(png|jpeg|webp|gif)$/.test(file.type)) return setError("Please choose a PNG, JPG, WEBP or GIF image.");
-    if (file.size > MAX_UPLOAD) return setError("Images must be 20 MB or smaller.");
+    if (file.size > MAX_UPLOAD) return setError("Images must be 4 MB or smaller.");
     setBusy("Uploading image…");
     try {
       const body = new FormData();
@@ -184,10 +187,11 @@ export function Studio({ product, config, fonts, initial, initialVariant }: Stud
     }
   }
 
-  async function saveAndAdd(lines: { variant: string; qty: number }[]) {
+  async function saveAndAdd(lines: { variant: string; qty: number }[], ignoreIssues = false) {
     const eng = engineRef.current;
     if (!eng) return;
     setError(null);
+    setIssues(null);
     sidesRef.current[side] = eng.serialize();
     const used = config.sides.map((s) => s.id).filter((id) => (sidesRef.current[id]?.objects.length ?? 0) > 0);
     if (used.length === 0) {
@@ -195,21 +199,60 @@ export function Studio({ product, config, fonts, initial, initialVariant }: Stud
       return setError("Add some text or an image to your design first.");
     }
 
-    setBusy("Saving your design…");
+    setBusy(ignoreIssues ? "Saving your design…" : "Checking your design…");
     const current = side;
+    const showSideAgain = async () => {
+      await eng.setupSide(current, dims(variant), sidesRef.current[current]?.background);
+      await eng.restore(sidesRef.current[current]);
+      fit();
+    };
     try {
-      const body = new FormData();
-      for (const id of used) {
-        await eng.setupSide(id, dims(variant), sidesRef.current[id]?.background ?? eng.background);
-        await eng.restore(sidesRef.current[id]);
-        const { preview, print } = await eng.export();
-        body.append(`${id}-preview`, preview, `${id}-preview.png`);
-        body.append(`${id}-print`, print, `${id}-print.png`);
+      // Preflight: catch soft images, text near the edge and short bleed before anything is ordered.
+      if (!ignoreIssues) {
+        const found: string[] = [];
+        for (const id of used) {
+          await eng.setupSide(id, dims(variant), sidesRef.current[id]?.background ?? eng.background);
+          await eng.restore(sidesRef.current[id]);
+          found.push(...eng.preflight());
+        }
+        if (found.length) {
+          await showSideAgain();
+          setBusy(null);
+          return setIssues({ list: found, lines });
+        }
+        setBusy("Saving your design…");
       }
-      body.append(
-        "meta",
-        JSON.stringify({ slug: product.slug, variant, sides: Object.fromEntries(used.map((id) => [id, sidesRef.current[id]])) }),
-      );
+
+      const meta = JSON.stringify({
+        slug: product.slug,
+        variant,
+        sides: Object.fromEntries(used.map((id) => [id, sidesRef.current[id]])),
+      });
+
+      // Export every side, shrinking the print files if needed to fit the upload limit.
+      let body = new FormData();
+      let scale = 1;
+      for (let attempt = 0; ; attempt++) {
+        body = new FormData();
+        let total = meta.length;
+        for (const id of used) {
+          await eng.setupSide(id, dims(variant), sidesRef.current[id]?.background ?? eng.background);
+          await eng.restore(sidesRef.current[id]);
+          const { preview, print, cut } = await eng.export(scale);
+          body.append(`${id}-preview`, preview, `${id}-preview.png`);
+          body.append(`${id}-print`, print, `${id}-print.png`);
+          total += preview.size + print.size;
+          if (cut) {
+            body.append(`${id}-cut`, new Blob([cut], { type: "image/svg+xml" }), `${id}-cut.svg`);
+            total += cut.length;
+          }
+        }
+        if (total <= MAX_DESIGN_BYTES) break;
+        if (attempt >= 5) throw new Error("This design is too detailed to save. Try fewer or smaller images.");
+        scale *= Math.max(0.4, Math.min(0.9, Math.sqrt(MAX_DESIGN_BYTES / total) * 0.95));
+        setBusy("Optimizing print files…");
+      }
+      body.append("meta", meta);
       const res = await fetch("/api/designs", { method: "POST", body });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error ?? "Could not save your design.");
@@ -219,9 +262,7 @@ export function Studio({ product, config, fonts, initial, initialVariant }: Stud
       router.push("/cart");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save your design.");
-      await eng.setupSide(current, dims(variant), sidesRef.current[current]?.background);
-      await eng.restore(sidesRef.current[current]);
-      fit();
+      await showSideAgain();
       setBusy(null);
     }
   }
@@ -291,7 +332,7 @@ export function Studio({ product, config, fonts, initial, initialVariant }: Stud
                   <path d="M12 16V4m0 0L7 9m5-5 5 5M4 20h16" />
                 </svg>
                 <span className="text-sm font-semibold text-navy">Upload an image</span>
-                <span className="text-xs text-ink/50">PNG, JPG, WEBP or GIF up to 20 MB</span>
+                <span className="text-xs text-ink/50">PNG, JPG, WEBP or GIF up to 4 MB</span>
                 <input
                   type="file"
                   accept="image/png,image/jpeg,image/webp,image/gif"
@@ -395,7 +436,13 @@ export function Studio({ product, config, fonts, initial, initialVariant }: Stud
           )}
         </div>
         <p className="mt-2 text-center text-xs text-ink/50">
-          Anything outside the dashed print area won&apos;t be printed.
+          {e && e.bleedPx > 0 ? (
+            <>
+              Blue line = final trimmed size · pink line = keep text inside · pink shaded edge = bleed: stretch backgrounds all the way out to it.
+            </>
+          ) : (
+            <>Anything outside the dashed print area won&apos;t be printed.</>
+          )}
         </p>
       </section>
 
@@ -489,11 +536,11 @@ export function Studio({ product, config, fonts, initial, initialVariant }: Stud
               {sel.kind === "image" && sel.dpi !== undefined && (
                 <p
                   className={`rounded-lg px-3 py-2 text-sm ${
-                    sel.dpi >= 150 ? "bg-cyan/10 text-navy" : sel.dpi >= 100 ? "bg-yellow/25 text-navy" : "bg-magenta/10 text-magenta"
+                    sel.dpi >= (sel.goodDpi ?? 150) ? "bg-cyan/10 text-navy" : sel.dpi >= (sel.minDpi ?? 100) ? "bg-yellow/25 text-navy" : "bg-magenta/10 text-magenta"
                   }`}
                 >
-                  Print quality: <b>{sel.dpi >= 150 ? "Great" : sel.dpi >= 100 ? "OK" : "Low"}</b> ({sel.dpi} DPI)
-                  {sel.dpi < 100 && <span className="block text-xs">Make it smaller or upload a larger image.</span>}
+                  Print quality: <b>{sel.dpi >= (sel.goodDpi ?? 150) ? "Great" : sel.dpi >= (sel.minDpi ?? 100) ? "OK" : "Low"}</b> ({sel.dpi} DPI at this size)
+                  {sel.dpi < (sel.minDpi ?? 100) && <span className="block text-xs">Make it smaller or upload a larger image.</span>}
                 </p>
               )}
 
@@ -543,6 +590,21 @@ export function Studio({ product, config, fonts, initial, initialVariant }: Stud
           <p className="mt-2 text-xs text-white/60">We&apos;ll send a proof before anything prints.</p>
         </div>
       </aside>
+
+      {issues && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-navy-900/60 p-4" role="dialog" aria-modal="true" onClick={() => setIssues(null)}>
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl" onClick={(ev) => ev.stopPropagation()}>
+            <h2 className="font-display text-xl text-navy">Check your design before ordering</h2>
+            <ul className="mt-4 list-disc space-y-2 pl-5 text-sm text-ink/80">
+              {issues.list.map((i) => <li key={i}>{i}</li>)}
+            </ul>
+            <div className="mt-6 flex justify-end gap-2">
+              <button type="button" onClick={() => setIssues(null)} className="btn-primary px-4 py-2">Go back and fix</button>
+              <button type="button" onClick={() => saveAndAdd(issues.lines, true)} className="btn-outline px-4 py-2">Order anyway</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {checkout && (
         <QuantityDialog

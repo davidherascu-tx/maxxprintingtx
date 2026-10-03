@@ -4,52 +4,52 @@ import { site } from "@/lib/site";
 
 export const metadata: Metadata = {
   title: "Ordering & delivery",
-  description: "How ordering works: proofs, invoices, payment, store pickup and delivery costs.",
+  description: "How ordering works: payment, proofs, store pickup and delivery costs.",
 };
 
 const steps = [
   {
-    title: "Place your order",
-    text: "Add products to your cart and check out. No payment is taken on the website.",
+    title: "Order & pay",
+    text: "Add products to your cart and check out. You pay securely by credit or debit card, and sales tax is added at checkout.",
     color: "bg-cyan",
   },
   {
     title: "Approve your proof",
-    text: "We review your artwork and email you a proof. We can make changes until you approve it.",
+    text: "We review your artwork and email you a proof. We can make changes until you approve it, and nothing prints before that.",
     color: "bg-magenta",
   },
   {
-    title: "Receive your invoice",
-    text: "We email you an invoice with the final total, including delivery and sales tax.",
+    title: "Delivery quote",
+    text: "If you chose local delivery, we email you the delivery cost and invoice it separately.",
     color: "bg-yellow",
   },
   {
-    title: "Pay & we print",
-    text: "Pay online with a credit card or PayPal. Production starts as soon as payment is received.",
+    title: "We print",
+    text: "Production starts once your proof is approved. Pick up in store or get it delivered.",
     color: "bg-navy",
   },
 ];
 
 const faqs = [
   {
-    q: "Do I pay when I place my order?",
-    a: "No. Placing an order only sends it to us. You pay after you approve the proof and receive your invoice, so you always know the final price first.",
+    q: "When do I pay?",
+    a: "At checkout, by credit or debit card. We send a proof afterwards, and nothing prints until you approve it.",
   },
   {
-    q: "How do I pay my invoice?",
-    a: "Your invoice email has a secure payment link. You can pay with a credit or debit card, or with PayPal. You can also pay in person at our store.",
+    q: "Is my card information safe?",
+    a: "Yes. Payment is handled by Stripe on its own secure page. Your card number never reaches our website. You can also pay in person at our store.",
   },
   {
     q: "How much does delivery cost?",
-    a: "It depends on the delivery address and the size of your order. We'll include the exact amount on your invoice, and you can switch to free store pickup at any time before you pay.",
+    a: "It depends on the delivery address and the size of your order. We'll email you the exact amount and invoice it separately. You can switch to free store pickup at any time.",
   },
   {
     q: "Is sales tax included in the prices on the website?",
-    a: "No. Prices on the website don't include tax. Texas sales tax is added to your invoice where it applies.",
+    a: "No. Prices on the website don't include tax. Sales tax (8.25%) is added at checkout.",
   },
   {
     q: "Can I change my order after placing it?",
-    a: "Yes. Contact us before you approve your proof and we'll update the order and the invoice.",
+    a: "Yes. Contact us before you approve your proof and we'll update the order.",
   },
   {
     q: "Do you ship outside the Houston area?",
@@ -79,15 +79,14 @@ export default function OrderingPage() {
 
       <div className="mt-12 grid gap-6 lg:grid-cols-2">
         <section className="rounded-2xl bg-mist p-6 sm:p-8">
-          <h2 className="text-lg font-semibold text-navy">Your invoice</h2>
-          <p className="mt-2 text-ink/70">After you approve your proof, we email you an invoice that shows:</p>
+          <h2 className="text-lg font-semibold text-navy">What you pay at checkout</h2>
+          <p className="mt-2 text-ink/70">Your order total at checkout shows:</p>
           <ul className="mt-4 space-y-2 text-sm text-ink/80">
             <li className="flex gap-2"><span className="text-magenta">●</span> Your products, quantities and prices</li>
-            <li className="flex gap-2"><span className="text-magenta">●</span> Delivery cost (if you chose delivery)</li>
-            <li className="flex gap-2"><span className="text-magenta">●</span> Texas sales tax, where it applies</li>
-            <li className="flex gap-2"><span className="text-magenta">●</span> The final total and a secure link to pay</li>
+            <li className="flex gap-2"><span className="text-magenta">●</span> Texas sales tax (8.25%)</li>
+            <li className="flex gap-2"><span className="text-magenta">●</span> The final total, paid securely by card</li>
           </ul>
-          <p className="mt-4 text-sm text-ink/60">We accept credit and debit cards and PayPal.</p>
+          <p className="mt-4 text-sm text-ink/60">Local delivery, if you choose it, is quoted and invoiced separately.</p>
         </section>
 
         <section className="rounded-2xl bg-mist p-6 sm:p-8">
@@ -101,10 +100,10 @@ export default function OrderingPage() {
               </p>
             </div>
             <div>
-              <h3 className="font-medium">Local delivery: quoted on your invoice</h3>
+              <h3 className="font-medium">Local delivery: quoted separately</h3>
               <p className="mt-1 text-sm text-ink/70">
-                The cost depends on the delivery address and the size of your order. You&apos;ll see the exact amount on
-                your invoice before you pay.
+                The cost depends on the delivery address and the size of your order. We&apos;ll email you the exact amount
+                and invoice it separately.
               </p>
             </div>
             <div>

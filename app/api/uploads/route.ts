@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { MAX_UPLOAD_BYTES, UPLOAD_TYPES, saveUpload } from "@/lib/files";
+import { MAX_UPLOAD_BYTES, MAX_REQUEST_BYTES, UPLOAD_TYPES, saveUpload } from "@/lib/files";
 
 // Check the file's magic bytes so the declared type can't be spoofed.
 function sniff(b: Buffer): string | null {
@@ -11,10 +11,13 @@ function sniff(b: Buffer): string | null {
 }
 
 export async function POST(request: Request) {
+  if (Number(request.headers.get("content-length")) > MAX_REQUEST_BYTES) {
+    return Response.json({ error: "Images must be 4 MB or smaller." }, { status: 413 });
+  }
   const form = await request.formData().catch(() => null);
   const file = form?.get("file");
   if (!(file instanceof File)) return Response.json({ error: "No file uploaded." }, { status: 400 });
-  if (file.size > MAX_UPLOAD_BYTES) return Response.json({ error: "Images must be 20 MB or smaller." }, { status: 413 });
+  if (file.size > MAX_UPLOAD_BYTES) return Response.json({ error: "Images must be 4 MB or smaller." }, { status: 413 });
 
   const bytes = Buffer.from(await file.arrayBuffer());
   const type = sniff(bytes);

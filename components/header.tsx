@@ -1,7 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { categories } from "@/lib/catalog";
-import { getCurrentUser } from "@/lib/session";
+import { getCurrentUser, isAdmin } from "@/lib/session";
 import { site } from "@/lib/site";
 import { CartButton, MobileMenu } from "./header-client";
 
@@ -42,6 +42,11 @@ export async function Header() {
             </svg>
             Design Studio
           </Link>
+          {isAdmin(user) && (
+            <Link href="/admin" className="hidden sm:inline-flex rounded-full px-3 py-2 text-sm font-semibold text-navy hover:bg-mist">
+              Orders
+            </Link>
+          )}
           <Link
             href={user ? "/account" : "/signin"}
             className="hidden sm:inline-flex items-center gap-2 rounded-full px-3 py-2 text-sm font-medium hover:bg-mist"

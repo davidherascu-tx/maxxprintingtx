@@ -12,7 +12,9 @@ export const UPLOAD_TYPES: Record<string, string> = {
   "image/webp": "webp",
   "image/gif": "gif",
 };
-export const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
+// Vercel rejects request bodies over 4.5 MB, so uploads stay under that with room for form overhead.
+export const MAX_UPLOAD_BYTES = 4 * 1024 * 1024;
+export const MAX_REQUEST_BYTES = 4.5 * 1000 * 1000;
 
 const ID = /^[0-9a-f-]{36}$/;
 export const isId = (id: string) => ID.test(id);
@@ -39,13 +41,18 @@ export async function readUpload(id: string) {
   return read(`uploads/${id}`);
 }
 
-/** Design files: `design.json`, `<side>-preview.png`, `<side>-print.png`. */
-const DESIGN_FILE = /^(design\.json|[a-z]+-(preview|print)\.png)$/;
+/** Design files: `design.json`, `<side>-preview.png`, `<side>-print.png`, `<side>-cut.svg`. */
+const DESIGN_FILE = /^(design\.json|[a-z]+-(preview|print)\.png|[a-z]+-cut\.svg)$/;
 export const isDesignFile = (name: string) => DESIGN_FILE.test(name);
+/** Only previews are public; print and cut files are production files for the owner and staff. */
+export const isPublicDesignFile = (name: string) => name.endsWith("-preview.png");
+
+export const designFileType = (name: string) =>
+  name.endsWith(".png") ? "image/png" : name.endsWith(".svg") ? "image/svg+xml" : "application/json";
 
 export async function saveDesignFile(id: string, name: string, bytes: Buffer | string) {
   if (!isId(id) || !isDesignFile(name)) throw new Error("Invalid design file");
-  await write(`designs/${id}/${name}`, bytes, name.endsWith(".png") ? "image/png" : "application/json");
+  await write(`designs/${id}/${name}`, bytes, designFileType(name));
 }
 
 export async function readDesignFile(id: string, name: string) {

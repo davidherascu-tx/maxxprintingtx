@@ -42,6 +42,10 @@ export type Order = {
   userId: string;
   items: OrderItem[];
   subtotal: number;
+  /** Sales tax on the subtotal. */
+  tax: number;
+  paymentStatus: "unpaid" | "paid" | "invoice";
+  stripeSessionId?: string;
   notes: string;
   fulfillment: "pickup" | "delivery";
   address?: string;
@@ -102,6 +106,12 @@ async function migrate(db: ReturnType<typeof neon>) {
     created_at timestamptz NOT NULL DEFAULT now()
   )`;
   await db`CREATE INDEX IF NOT EXISTS orders_user_idx ON orders (user_id)`;
+  // Online payment. Orders placed before payments existed were invoiced, so they default to "invoice".
+  await db`ALTER TABLE orders ADD COLUMN IF NOT EXISTS tax numeric NOT NULL DEFAULT 0`;
+  await db`ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_status text NOT NULL DEFAULT 'invoice'`;
+  await db`ALTER TABLE orders ADD COLUMN IF NOT EXISTS stripe_session_id text`;
+  await db`ALTER TABLE orders ADD COLUMN IF NOT EXISTS paid_at timestamptz`;
+  await db`ALTER TABLE orders ALTER COLUMN payment_status SET DEFAULT 'unpaid'`;
   await db`CREATE INDEX IF NOT EXISTS designs_user_idx ON designs (user_id)`;
   // Set when a user deletes a design that an order still uses; such designs are hidden, not removed.
   await db`ALTER TABLE designs ADD COLUMN IF NOT EXISTS deleted_at timestamptz`;
@@ -134,6 +144,9 @@ const toOrder = (r: Row): Order => ({
   userId: r.user_id,
   items: r.items,
   subtotal: Number(r.subtotal),
+  tax: Number(r.tax),
+  paymentStatus: r.payment_status,
+  stripeSessionId: r.stripe_session_id ?? undefined,
   notes: r.notes,
   fulfillment: r.fulfillment,
   address: r.address ?? undefined,
@@ -180,15 +193,71 @@ export async function ordersForUser(userId: string) {
   return rows.map(toOrder);
 }
 
-export async function createOrder(input: Omit<Order, "id" | "number" | "status" | "createdAt">) {
+export const ORDER_STATUSES: Order["status"][] = ["Received", "In production", "Ready", "Completed"];
+
+export type AdminOrder = Order & { customer: { name: string; email: string; phone?: string; company?: string } };
+
+/** Every order with its customer, newest first. For staff only. */
+export async function allOrders(limit = 200): Promise<AdminOrder[]> {
+  const rows = await sql`
+    SELECT o.*, u.name AS customer_name, u.email AS customer_email, u.phone AS customer_phone, u.company AS customer_company
+    FROM orders o JOIN users u ON u.id = o.user_id
+    ORDER BY o.created_at DESC LIMIT ${limit}`;
+  return rows.map((r) => ({
+    ...toOrder(r),
+    customer: { name: r.customer_name, email: r.customer_email, phone: r.customer_phone ?? undefined, company: r.customer_company ?? undefined },
+  }));
+}
+
+export async function setOrderStatus(id: string, status: Order["status"]) {
+  if (!UUID.test(id) || !ORDER_STATUSES.includes(status)) return;
+  await sql`UPDATE orders SET status = ${status} WHERE id = ${id}`;
+}
+
+/** Creates an order awaiting payment. */
+export async function createOrder(
+  input: Omit<Order, "id" | "number" | "status" | "createdAt" | "paymentStatus" | "stripeSessionId">,
+) {
   const [row] = await sql`
-    INSERT INTO orders (id, number, user_id, items, subtotal, notes, fulfillment, address)
+    INSERT INTO orders (id, number, user_id, items, subtotal, tax, notes, fulfillment, address, payment_status)
     VALUES (
       ${randomUUID()}, 'MX-' || nextval('order_number_seq'), ${input.userId}, ${JSON.stringify(input.items)}::jsonb,
-      ${input.subtotal}, ${input.notes}, ${input.fulfillment}, ${input.address ?? null}
+      ${input.subtotal}, ${input.tax}, ${input.notes}, ${input.fulfillment}, ${input.address ?? null}, 'unpaid'
     )
     RETURNING *`;
   return toOrder(row);
+}
+
+export async function findOrder(id: string) {
+  if (!UUID.test(id)) return undefined;
+  const [row] = await sql`SELECT * FROM orders WHERE id = ${id}`;
+  return row ? toOrder(row) : undefined;
+}
+
+export async function setOrderSession(id: string, sessionId: string) {
+  await sql`UPDATE orders SET stripe_session_id = ${sessionId} WHERE id = ${id}`;
+}
+
+export async function unpaidOrdersForUser(userId: string) {
+  const rows = await sql`SELECT * FROM orders WHERE user_id = ${userId} AND payment_status = 'unpaid'`;
+  return rows.map(toOrder);
+}
+
+export async function deleteUnpaidOrder(id: string) {
+  await sql`DELETE FROM orders WHERE id = ${id} AND payment_status = 'unpaid'`;
+}
+
+/**
+ * Mark an order paid once Stripe confirms the charge. The amount must match what we asked
+ * for. Safe to call twice (the webhook and the return page both do). Returns whether it is paid.
+ */
+export async function markOrderPaid(id: string, sessionId: string, amountCents: number) {
+  if (!UUID.test(id)) return false;
+  await sql`
+    UPDATE orders SET payment_status = 'paid', paid_at = now(), stripe_session_id = ${sessionId}
+    WHERE id = ${id} AND payment_status = 'unpaid' AND round((subtotal + tax) * 100) = ${amountCents}`;
+  const [row] = await sql`SELECT payment_status FROM orders WHERE id = ${id}`;
+  return row?.payment_status === "paid";
 }
 
 export async function findDesign(id: string) {

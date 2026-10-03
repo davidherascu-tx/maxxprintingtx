@@ -113,6 +113,43 @@ const configs: Record<string, DesignConfig> = {
   },
 };
 
+/** Margin (inches) kept around contour-cut artwork so the cut line stays inside the file. */
+export const CUT_MARGIN_IN = 0.0625;
+
+export type PrintSpec = {
+  /** Resolution of the print file. */
+  dpi: number;
+  /** Extra artwork beyond the trim line, per edge, in inches. */
+  bleedIn: number;
+  /** Keep text this far inside the trim line, in inches. */
+  safeIn: number;
+  /** Uploaded images at or above this effective DPI print well. */
+  goodDpi: number;
+  /** Below this effective DPI we warn that the print will look soft. */
+  minDpi: number;
+  /** Artwork is contour-cut, so the studio also exports a cut path. */
+  cut: boolean;
+};
+
+/**
+ * Production rules for a product: small items are printed sharp (300 DPI), large-format
+ * pieces at a lower DPI that is still right for their viewing distance.
+ * `dims` is the width × height in inches of a flat product.
+ */
+export function printSpec(config: DesignConfig, dims: [number, number] = [1, 1]): PrintSpec {
+  const flat = config.kind === "flat";
+  const long = flat ? Math.max(...dims) : Math.max(...config.sides.map((s) => s.widthIn));
+  const tier = long <= 14 ? { dpi: 300, goodDpi: 150, minDpi: 100 } : long <= 40 ? { dpi: 150, goodDpi: 100, minDpi: 72 } : { dpi: 100, goodDpi: 72, minDpi: 50 };
+  const cut = flat && !!config.transparent;
+  const trimmed = flat && !cut;
+  return {
+    ...tier,
+    bleedIn: trimmed ? (long > 48 ? 0.25 : 0.125) : 0,
+    safeIn: trimmed ? (long <= 14 ? 0.125 : long <= 40 ? 0.25 : 0.5) : 0,
+    cut,
+  };
+}
+
 export function getDesignConfig(slug: string): DesignConfig | undefined {
   return configs[slug];
 }

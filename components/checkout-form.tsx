@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useActionState, useState } from "react";
 import { placeOrder } from "@/lib/actions";
 import { colorOf, formatPrice, getProduct } from "@/lib/catalog";
+import { calcTax, TAX_LABEL } from "@/lib/tax";
 import { linePrice, useCart } from "./cart";
 
 export function CheckoutForm() {
@@ -35,7 +36,7 @@ export function CheckoutForm() {
             {(
               [
                 ["pickup", "Store pickup", "12655 Woodforest Blvd, Ste 100, Houston"],
-                ["delivery", "Local delivery", "We'll confirm delivery cost with you"],
+                ["delivery", "Local delivery", "Delivery cost is quoted and invoiced separately"],
               ] as const
             ).map(([value, title, text]) => (
               <label
@@ -100,19 +101,27 @@ export function CheckoutForm() {
           <span>Subtotal</span>
           <span>{formatPrice(subtotal)}</span>
         </div>
+        <div className="mt-2 flex justify-between text-sm text-ink/60">
+          <span>Sales tax ({TAX_LABEL})</span>
+          <span>{formatPrice(calcTax(subtotal))}</span>
+        </div>
         {fulfillment === "delivery" && (
           <div className="mt-2 flex justify-between text-sm text-ink/60">
             <span>Delivery</span>
-            <span>Quoted after you order</span>
+            <span>Quoted separately</span>
           </div>
         )}
+        <div className="mt-3 flex justify-between border-t border-line pt-3 text-lg font-bold text-navy">
+          <span>Total</span>
+          <span>{formatPrice(subtotal + calcTax(subtotal))}</span>
+        </div>
         <p className="mt-2 text-xs text-ink/50">
-          No payment is taken online. We&apos;ll confirm your proof and send an invoice before production.{" "}
+          You&apos;ll pay securely by card on the next page (powered by Stripe). We send a proof before anything prints.{" "}
           <Link href="/ordering" className="underline hover:text-navy">How it works</Link>
         </p>
         {state?.error && <p className="mt-4 rounded-lg bg-magenta/10 px-3 py-2 text-sm text-magenta">{state.error}</p>}
         <button type="submit" disabled={pending} className="btn-primary mt-6 w-full">
-          {pending ? "Placing order…" : "Place order"}
+          {pending ? "Redirecting to payment…" : "Continue to payment"}
         </button>
       </aside>
     </form>
