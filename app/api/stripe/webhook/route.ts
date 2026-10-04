@@ -1,4 +1,4 @@
-import { paymentsConfigured, settleSession, stripe } from "@/lib/payments";
+import { cryptoProvider, paymentsConfigured, settleSession, stripe } from "@/lib/payments";
 
 // Stripe calls this when a customer pays. The signature proves the call is from Stripe.
 export async function POST(request: Request) {
@@ -8,7 +8,7 @@ export async function POST(request: Request) {
 
   let event;
   try {
-    event = stripe().webhooks.constructEvent(await request.text(), signature, secret);
+    event = await stripe().webhooks.constructEventAsync(await request.text(), signature, secret, undefined, cryptoProvider);
   } catch {
     return new Response("Invalid signature", { status: 400 });
   }

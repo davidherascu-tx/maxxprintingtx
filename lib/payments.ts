@@ -12,8 +12,12 @@ let client: Stripe | undefined;
 export function stripe() {
   const key = process.env.STRIPE_SECRET_KEY;
   if (!key) throw new Error("STRIPE_SECRET_KEY must be set");
-  return (client ??= new Stripe(key));
+  // Workers have no Node http, so Stripe must use fetch.
+  return (client ??= new Stripe(key, { httpClient: Stripe.createFetchHttpClient() }));
 }
+
+/** Verifies webhook signatures with Web Crypto (Node crypto isn't used on Workers). */
+export const cryptoProvider = Stripe.createSubtleCryptoProvider();
 
 const cents = (n: number) => Math.round(n * 100);
 
