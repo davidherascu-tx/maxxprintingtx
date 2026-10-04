@@ -62,10 +62,17 @@ type Row = Record<string, any>;
  */
 async function sql(strings: TemplateStringsArray, ...values: unknown[]): Promise<Row[]> {
   const url = process.env.DATABASE_URL;
-  if (!url) throw new Error("DATABASE_URL must be set");
+  if (!url) {
+    console.error("DB: DATABASE_URL is not set in this environment");
+    throw new Error("DATABASE_URL must be set");
+  }
   const client = postgres(url, { prepare: false, max: 1, connect_timeout: 10 });
   try {
     return [...(await client(strings, ...(values as never[])))] as Row[];
+  } catch (e) {
+    // Cloudflare logs only show a stack trace, so print the message too.
+    console.error("DB query failed:", e instanceof Error ? `${e.name}: ${e.message}` : String(e));
+    throw e;
   } finally {
     await client.end({ timeout: 1 });
   }
