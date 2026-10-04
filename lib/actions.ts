@@ -164,7 +164,7 @@ export async function placeOrder(_: FormState, form: FormData): Promise<FormStat
   try {
     url = await startCheckout(order, user.email, await originOf());
   } catch (e) {
-    console.error("Failed to start checkout", e);
+    console.error("Failed to start checkout:", e instanceof Error ? `${e.name}: ${e.message}` : String(e), (e as { type?: string; code?: string }).type ?? "", (e as { code?: string }).code ?? "");
     await deleteUnpaidOrder(order.id);
     return { error: "We couldn't start the payment. Please try again." };
   }
@@ -204,7 +204,7 @@ export async function payOrder(form: FormData) {
   try {
     url = await startCheckout(order, user.email, await originOf());
   } catch (e) {
-    console.error("Failed to start checkout", e);
+    console.error("Failed to start checkout:", e instanceof Error ? `${e.name}: ${e.message}` : String(e), (e as { type?: string; code?: string }).type ?? "", (e as { code?: string }).code ?? "");
   }
   if (!url) redirect("/account?payment_error=1");
   redirect(url);
