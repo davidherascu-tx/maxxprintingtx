@@ -182,7 +182,7 @@ export async function createOrder(
   const [row] = await sql`
     INSERT INTO orders (id, number, user_id, items, subtotal, tax, notes, fulfillment, address, payment_status)
     VALUES (
-      ${randomUUID()}, 'MX-' || nextval('order_number_seq'), ${input.userId}, ${JSON.stringify(input.items)}::jsonb,
+      ${randomUUID()}, 'MX-' || nextval('order_number_seq'), ${input.userId}, ${JSON.stringify(input.items)}::text::jsonb,
       ${input.subtotal}, ${input.tax}, ${input.notes}, ${input.fulfillment}, ${input.address ?? null}, 'unpaid'
     )
     RETURNING *`;
@@ -256,7 +256,7 @@ export async function deleteDesign(id: string, userId: string) {
   const used = JSON.stringify([{ designId: id }]);
   const [removed] = await sql`
     DELETE FROM designs WHERE id = ${id} AND user_id = ${userId}
-      AND NOT EXISTS (SELECT 1 FROM orders WHERE items @> ${used}::jsonb)
+      AND NOT EXISTS (SELECT 1 FROM orders WHERE items @> ${used}::text::jsonb)
     RETURNING id`;
   if (removed) return { removed: true };
   const [hidden] = await sql`UPDATE designs SET deleted_at = now() WHERE id = ${id} AND user_id = ${userId} RETURNING id`;
