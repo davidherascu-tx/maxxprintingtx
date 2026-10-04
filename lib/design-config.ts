@@ -31,6 +31,12 @@ const tee = (front: string, back?: string, area: Area = { x: 0.3, y: 0.2, w: 0.4
   return { kind: "mockup" as const, sides };
 };
 
+// Cap front panel. The mockup is cropped to the hat, so the area is a box on the front panel.
+const cap = (mockup: string, area: Area) => ({
+  kind: "mockup" as const,
+  sides: [{ id: "front", label: "Front", mockup, area, widthIn: 4.5 }],
+});
+
 const front = [{ id: "front", label: "Front" }];
 const frontBack = [...front, { id: "back", label: "Back" }];
 
@@ -102,6 +108,9 @@ const configs: Record<string, DesignConfig> = {
   "leopard-print-tee": tee("/products/apparel/1000054.png", undefined, { x: 0.3, y: 0.26, w: 0.42, h: 0.46 }),
   "womens-micro-rib-baby-tee": tee("/products/apparel/1000046.png", "/products/apparel/1000046-back.png", { x: 0.36, y: 0.2, w: 0.28, h: 0.4 }, 9),
   "long-sleeve-pocket-t-shirt": tee("/products/apparel/1000019.png", "/products/apparel/1000019-back.png", { x: 0.34, y: 0.24, w: 0.32, h: 0.48 }),
+  // Headwear
+  "richardson-112-trucker-cap": cap("/products/headwear/richardson-112-front.png", { x: 0.354, y: 0.262, w: 0.294, h: 0.286 }),
+  "richardson-169-cannon-flatbill": cap("/products/headwear/richardson-169-front.png", { x: 0.36, y: 0.31, w: 0.286, h: 0.286 }),
   // Trade Show
   "advertising-tent": {
     kind: "mockup",
