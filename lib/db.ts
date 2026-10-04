@@ -1,10 +1,8 @@
 import "server-only";
-import { neon } from "@neondatabase/serverless";
+import postgres from "postgres";
 import { randomUUID } from "node:crypto";
 
-// Postgres store (Neon). Needs DATABASE_URL, which the Neon integration sets on
-// the Vercel project; run `vercel env pull .env.local` for local dev.
-// Tables are created on first use, so there's no separate migration step.
+// Postgres store (Supabase). Needs DATABASE_URL (the Supabase pooler connection string).
 
 export type User = {
   id: string;
@@ -56,65 +54,21 @@ export type Order = {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Row = Record<string, any>;
 
-let client: ReturnType<typeof neon> | undefined;
-let ready: Promise<unknown> | undefined;
-
-/** Run a query once the schema exists. Connects lazily so builds don't need DATABASE_URL. */
+/**
+ * Run a query. Connects lazily so builds don't need DATABASE_URL. Uses the Supabase pooler
+ * connection string (transaction mode), so prepared statements are off. A connection is opened
+ * per query because Cloudflare Workers can't reuse sockets across requests; the pooler makes
+ * that cheap. The schema lives in supabase/schema.sql and is applied once in the Supabase SQL editor.
+ */
 async function sql(strings: TemplateStringsArray, ...values: unknown[]): Promise<Row[]> {
-  if (!client) {
-    const url = process.env.DATABASE_URL;
-    if (!url) throw new Error("DATABASE_URL must be set");
-    client = neon(url);
+  const url = process.env.DATABASE_URL;
+  if (!url) throw new Error("DATABASE_URL must be set");
+  const client = postgres(url, { prepare: false, max: 1, connect_timeout: 10 });
+  try {
+    return [...(await client(strings, ...(values as never[])))] as Row[];
+  } finally {
+    await client.end({ timeout: 1 });
   }
-  ready ??= migrate(client).catch((e) => {
-    ready = undefined;
-    throw e;
-  });
-  await ready;
-  return (await client(strings, ...values)) as Row[];
-}
-
-async function migrate(db: ReturnType<typeof neon>) {
-  await db`CREATE TABLE IF NOT EXISTS users (
-    id uuid PRIMARY KEY,
-    name text NOT NULL,
-    email text NOT NULL UNIQUE,
-    password_hash text NOT NULL,
-    phone text,
-    company text,
-    created_at timestamptz NOT NULL DEFAULT now()
-  )`;
-  await db`CREATE TABLE IF NOT EXISTS designs (
-    id uuid PRIMARY KEY,
-    user_id uuid REFERENCES users(id),
-    slug text NOT NULL,
-    variant text NOT NULL,
-    sides text[] NOT NULL,
-    created_at timestamptz NOT NULL DEFAULT now()
-  )`;
-  await db`CREATE SEQUENCE IF NOT EXISTS order_number_seq START 1001`;
-  await db`CREATE TABLE IF NOT EXISTS orders (
-    id uuid PRIMARY KEY,
-    number text NOT NULL UNIQUE,
-    user_id uuid NOT NULL REFERENCES users(id),
-    items jsonb NOT NULL,
-    subtotal numeric NOT NULL,
-    notes text NOT NULL DEFAULT '',
-    fulfillment text NOT NULL,
-    address text,
-    status text NOT NULL DEFAULT 'Received',
-    created_at timestamptz NOT NULL DEFAULT now()
-  )`;
-  await db`CREATE INDEX IF NOT EXISTS orders_user_idx ON orders (user_id)`;
-  // Online payment. Orders placed before payments existed were invoiced, so they default to "invoice".
-  await db`ALTER TABLE orders ADD COLUMN IF NOT EXISTS tax numeric NOT NULL DEFAULT 0`;
-  await db`ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_status text NOT NULL DEFAULT 'invoice'`;
-  await db`ALTER TABLE orders ADD COLUMN IF NOT EXISTS stripe_session_id text`;
-  await db`ALTER TABLE orders ADD COLUMN IF NOT EXISTS paid_at timestamptz`;
-  await db`ALTER TABLE orders ALTER COLUMN payment_status SET DEFAULT 'unpaid'`;
-  await db`CREATE INDEX IF NOT EXISTS designs_user_idx ON designs (user_id)`;
-  // Set when a user deletes a design that an order still uses; such designs are hidden, not removed.
-  await db`ALTER TABLE designs ADD COLUMN IF NOT EXISTS deleted_at timestamptz`;
 }
 
 const iso = (d: Date | string) => new Date(d).toISOString();
