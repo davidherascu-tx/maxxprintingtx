@@ -1,6 +1,4 @@
--- Run once in Supabase: SQL Editor > New query > paste > Run.
--- The app reaches these tables only from the server (direct Postgres connection), so
--- row level security is on with no public policies: the public anon key can't read them.
+-- Run once in Neon: SQL Editor > paste > Run.
 
 CREATE TABLE IF NOT EXISTS users (
   id uuid PRIMARY KEY,
@@ -43,7 +41,3 @@ CREATE TABLE IF NOT EXISTS orders (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS orders_user_idx ON orders (user_id);
-
-ALTER TABLE users ENABLE ROW LEVEL SECURITY;
-ALTER TABLE designs ENABLE ROW LEVEL SECURITY;
-ALTER TABLE orders ENABLE ROW LEVEL SECURITY;

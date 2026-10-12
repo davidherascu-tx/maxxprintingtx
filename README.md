@@ -26,12 +26,12 @@ npm run dev
 
 Open http://localhost:3000.
 
-## Hosting: Cloudflare Workers + Supabase
+## Hosting: Cloudflare Workers + Neon
 
-- Database: Supabase Postgres. Run `supabase/schema.sql` once in the Supabase SQL editor.
-- Files: private Supabase Storage bucket named `files`.
+- Database: Neon Postgres. Run `db/schema.sql` once in the Neon SQL editor.
+- Files: private Neon Object Storage bucket named `files` (S3-compatible). Set `NEON_S3_ENDPOINT`, `NEON_S3_REGION`, `NEON_S3_ACCESS_KEY_ID`, `NEON_S3_SECRET_ACCESS_KEY` (create the bucket and a storage credential with the Neon CLI: `neon buckets create files`, `neon credentials create --scope storage:read --scope storage:write`).
 - Hosting: Cloudflare Workers via OpenNext (`wrangler.jsonc`, `open-next.config.ts`).
-- Secrets (set in Cloudflare → Workers → maxxprintingtx → Settings → Variables and Secrets): `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SESSION_SECRET`, `ADMIN_EMAILS`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`.
+- Secrets (set in Cloudflare → Workers → maxxprintingtx → Settings → Variables and Secrets): `DATABASE_URL`, the four `NEON_S3_*` values, `SESSION_SECRET`, `ADMIN_EMAILS`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`.
 - `npm run preview` runs the Cloudflare build locally; `npm run deploy` ships it.
 
 ## Card payments (Stripe)
@@ -53,7 +53,7 @@ An order is saved as "Awaiting payment" and only becomes a real order when Strip
 | --- | --- |
 | `lib/catalog.ts` | Categories, products, options and prices |
 | `lib/site.ts` | Business name, address, phone, email |
-| `lib/db.ts` | Users, orders and designs in Supabase Postgres (schema in `supabase/schema.sql`) |
+| `lib/db.ts` | Users, orders and designs in Neon Postgres (schema in `db/schema.sql`) |
 | `lib/session.ts` | Password hashing and session cookie |
 | `lib/payments.ts`, `lib/tax.ts`, `app/api/stripe/webhook` | Stripe Checkout, sales tax, and the payment webhook |
 | `lib/actions.ts` | Server actions: sign up/in/out, profile, place order |
@@ -63,14 +63,14 @@ An order is saved as "Awaiting payment" and only becomes a real order when Strip
 | `components/studio/` | The studio UI (`studio.tsx`) and Fabric.js canvas engine (`engine.ts`) |
 | `app/api/uploads`, `app/api/designs` | Image upload and design save/serve endpoints. Print and cut files are only served to the owner and to staff |
 | `app/admin` | Staff order list with status updates and print/cut file downloads |
-| `lib/files.ts` | Uploads and design files in a private Supabase Storage bucket (`uploads/`, `designs/<id>/`) |
+| `lib/files.ts` | Uploads and design files in a private Neon Object Storage bucket (`uploads/`, `designs/<id>/`) |
 | `public/products` | Product images (from the InkSoft store) |
 
 ## Before going live
 
-- Set `DATABASE_URL`, `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` (see `.env.example`) and create a private Storage bucket named `files`.
+- Set `DATABASE_URL` and the `NEON_S3_*` values (see `.env.example`) and create the `files` bucket.
 - `SESSION_SECRET` must be set in production (Settings → Environment Variables).
 - Prices in `lib/catalog.ts` are placeholders. Update them to the shop's real pricing.
 - Set `ADMIN_EMAILS` (comma-separated) to the sign-in emails of staff. Those accounts get an **Orders** link in the header and `/admin`, where each order lists its print files (and cut paths) for download. Create the staff account first via Sign up.
-- Request bodies are kept under 4.5 MB, so image uploads are capped at 4 MB, and a saved design (all preview and print files together) is kept under about 3.8 MB. If the print files would be bigger, the studio lowers their DPI just enough to fit; the DPI stored in each PNG always matches its real size. For full-resolution files on large jobs, ask customers to send artwork directly or upload straight to Supabase Storage from the browser.
+- Request bodies are kept under 4.5 MB, so image uploads are capped at 4 MB, and a saved design (all preview and print files together) is kept under about 3.8 MB. If the print files would be bigger, the studio lowers their DPI just enough to fit; the DPI stored in each PNG always matches its real size. For full-resolution files on large jobs, ask customers to send artwork directly or upload straight to the bucket from the browser.
 - **Print PDFs** (`/admin` → PDF, PDF + crop marks; or `/api/designs/<id>/<side>-print.pdf[?marks=1][&rgb=1]`) are built on demand from the saved print PNG: page size from the PNG's DPI, TrimBox and BleedBox set, text already flattened to pixels (no fonts to embed), CMYK artwork by default, optional crop marks, and the cut line as a `CutContour` spot color on contour-cut products. Limits to know: the CMYK conversion is a plain formula, not ICC color-managed; there is no PDF/X OutputIntent, so it will not pass a strict PDF/X-1a or X-4 check; and the artwork resolution is whatever the saved PNG has (see the 4.5 MB note above). For certified PDF/X or managed CMYK, run the PDF through Acrobat Preflight or your RIP with your shop's profile.

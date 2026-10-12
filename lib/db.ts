@@ -2,7 +2,7 @@ import "server-only";
 import postgres from "postgres";
 import { randomUUID } from "node:crypto";
 
-// Postgres store (Supabase). Needs DATABASE_URL (the Supabase pooler connection string).
+// Postgres store (Neon). Needs DATABASE_URL (the Neon pooled connection string).
 
 export type User = {
   id: string;
@@ -55,10 +55,10 @@ export type Order = {
 type Row = Record<string, any>;
 
 /**
- * Run a query. Connects lazily so builds don't need DATABASE_URL. Uses the Supabase pooler
- * connection string (transaction mode), so prepared statements are off. A connection is opened
- * per query because Cloudflare Workers can't reuse sockets across requests; the pooler makes
- * that cheap. The schema lives in supabase/schema.sql and is applied once in the Supabase SQL editor.
+ * Run a query. Connects lazily so builds don't need DATABASE_URL. Uses the Neon pooler
+ * connection string (PgBouncer, transaction mode), so prepared statements are off. A connection is
+ * opened per query because Cloudflare Workers can't reuse sockets across requests; the pooler makes
+ * that cheap. The schema lives in db/schema.sql and is applied once in the Neon SQL editor.
  */
 async function sql(strings: TemplateStringsArray, ...values: unknown[]): Promise<Row[]> {
   const url = process.env.DATABASE_URL;

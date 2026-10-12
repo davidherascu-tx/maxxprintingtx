@@ -1,21 +1,31 @@
 import "server-only";
-import { createClient } from "@supabase/supabase-js";
+import { AwsClient } from "aws4fetch";
 
-// Uploaded artwork and rendered design files, stored in a private Supabase Storage bucket.
-// Needs SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (server only). The bucket must exist and be
-// private (see README). Files are served through our own /api routes, never by direct URL.
+// Uploaded artwork and rendered design files, stored in a private Neon Object Storage bucket
+// (S3-compatible, path-style). Needs NEON_S3_ENDPOINT, NEON_S3_REGION, NEON_S3_ACCESS_KEY_ID and
+// NEON_S3_SECRET_ACCESS_KEY (server only); see README. Files are served through our own /api
+// routes, never by direct URL.
 
 const BUCKET = "files";
 
-let supabase: ReturnType<typeof createClient> | undefined;
-function storage() {
-  if (!supabase) {
-    const url = process.env.SUPABASE_URL;
-    const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    if (!url || !key) throw new Error("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set");
-    supabase = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
+let aws: AwsClient | undefined;
+function objectUrl(path = "") {
+  const endpoint = process.env.NEON_S3_ENDPOINT;
+  if (!endpoint) throw new Error("NEON_S3_ENDPOINT must be set");
+  return `${endpoint.replace(/\/$/, "")}/${BUCKET}${path}`;
+}
+
+async function s3(path: string, init: RequestInit = {}) {
+  if (!aws) {
+    const accessKeyId = process.env.NEON_S3_ACCESS_KEY_ID;
+    const secretAccessKey = process.env.NEON_S3_SECRET_ACCESS_KEY;
+    const region = process.env.NEON_S3_REGION;
+    if (!accessKeyId || !secretAccessKey || !region) {
+      throw new Error("NEON_S3_ACCESS_KEY_ID, NEON_S3_SECRET_ACCESS_KEY and NEON_S3_REGION must be set");
+    }
+    aws = new AwsClient({ accessKeyId, secretAccessKey, region, service: "s3" });
   }
-  return supabase.storage.from(BUCKET);
+  return aws.fetch(objectUrl(path), init);
 }
 
 export const UPLOAD_TYPES: Record<string, string> = {
@@ -32,14 +42,18 @@ const ID = /^[0-9a-f-]{36}$/;
 export const isId = (id: string) => ID.test(id);
 
 async function write(pathname: string, body: Buffer | string, contentType: string) {
-  const { error } = await storage().upload(pathname, body, { contentType, upsert: true });
-  if (error) throw error;
+  const res = await s3(`/${pathname}`, {
+    method: "PUT",
+    headers: { "content-type": contentType },
+    body: typeof body === "string" ? body : new Uint8Array(body),
+  });
+  if (!res.ok) throw new Error(`Storage upload failed (${res.status}): ${await res.text()}`);
 }
 
 async function read(pathname: string) {
-  const { data, error } = await storage().download(pathname);
-  if (error || !data) return null;
-  return { bytes: Buffer.from(await data.arrayBuffer()), type: data.type };
+  const res = await s3(`/${pathname}`);
+  if (!res.ok) return null;
+  return { bytes: Buffer.from(await res.arrayBuffer()), type: res.headers.get("content-type") ?? "" };
 }
 
 export async function saveUpload(id: string, type: string, bytes: Buffer) {
@@ -72,6 +86,8 @@ export async function readDesignFile(id: string, name: string) {
 
 export async function deleteDesignFiles(id: string) {
   if (!isId(id)) return;
-  const { data } = await storage().list(`designs/${id}`);
-  if (data?.length) await storage().remove(data.map((f) => `designs/${id}/${f.name}`));
+  const list = await s3(`?list-type=2&prefix=${encodeURIComponent(`designs/${id}/`)}`);
+  if (!list.ok) return;
+  const keys = [...(await list.text()).matchAll(/<Key>([^<]+)<\/Key>/g)].map((m) => m[1]);
+  await Promise.all(keys.map((key) => s3(`/${key}`, { method: "DELETE" })));
 }
