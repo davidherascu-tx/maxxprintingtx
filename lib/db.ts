@@ -1,5 +1,5 @@
 import "server-only";
-import postgres from "postgres";
+import { neon } from "@neondatabase/serverless";
 import { randomUUID } from "node:crypto";
 
 // Postgres store (Neon). Needs DATABASE_URL (the Neon pooled connection string).
@@ -55,10 +55,10 @@ export type Order = {
 type Row = Record<string, any>;
 
 /**
- * Run a query. Connects lazily so builds don't need DATABASE_URL. Uses the Neon pooler
- * connection string (PgBouncer, transaction mode), so prepared statements are off. A connection is
- * opened per query because Cloudflare Workers can't reuse sockets across requests; the pooler makes
- * that cheap. The schema lives in db/schema.sql and is applied once in the Neon SQL editor.
+ * Run a query. Connects lazily so builds don't need DATABASE_URL. Uses Neon's serverless driver,
+ * which sends each query over HTTPS: Cloudflare Workers can't open a direct Postgres connection
+ * to Neon, and can't reuse sockets across requests anyway. Use the pooled connection string.
+ * The schema lives in db/schema.sql and is applied once in the Neon SQL editor.
  */
 async function sql(strings: TemplateStringsArray, ...values: unknown[]): Promise<Row[]> {
   const url = process.env.DATABASE_URL;
@@ -66,15 +66,12 @@ async function sql(strings: TemplateStringsArray, ...values: unknown[]): Promise
     console.error("DB: DATABASE_URL is not set in this environment");
     throw new Error("DATABASE_URL must be set");
   }
-  const client = postgres(url, { prepare: false, max: 1, connect_timeout: 10 });
   try {
-    return [...(await client(strings, ...(values as never[])))] as Row[];
+    return (await neon(url)(strings, ...values)) as Row[];
   } catch (e) {
     // Cloudflare logs only show a stack trace, so print the message too.
     console.error("DB query failed:", e instanceof Error ? `${e.name}: ${e.message}` : String(e));
     throw e;
-  } finally {
-    await client.end({ timeout: 1 });
   }
 }
 
