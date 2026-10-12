@@ -68,7 +68,7 @@ An order is saved as "Awaiting payment" and only becomes a real order when Strip
 
 ## Before going live
 
-- Set `DATABASE_URL` and the `NEON_S3_*` values (see `.env.example`) and create the `files` bucket.
+- Set `DATABASE_URL` and the `NEON_S3_*` values (listed above) and create the `files` bucket.
 - `SESSION_SECRET` must be set in production (Settings → Environment Variables).
 - Prices in `lib/catalog.ts` are placeholders. Update them to the shop's real pricing.
 - Set `ADMIN_EMAILS` (comma-separated) to the sign-in emails of staff. Those accounts get an **Orders** link in the header and `/admin`, where each order lists its print files (and cut paths) for download. Create the staff account first via Sign up.
