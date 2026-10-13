@@ -10,6 +10,7 @@ import {
 import { deleteDesignFiles } from "./files";
 import { createSession, deleteSession, getCurrentUser, hashPassword, isAdmin, verifyPassword } from "./session";
 import { colorOf, getProduct } from "./catalog";
+import { requiresDesign } from "./design-config";
 import { expireSession, paymentsConfigured, startCheckout } from "./payments";
 import { calcTax } from "./tax";
 
@@ -112,6 +113,7 @@ export async function placeOrder(_: FormState, form: FormData): Promise<FormStat
         const variant = product?.variants.find((v) => v.id === line.variant);
         const qty = product?.noQty ? 1 : Math.floor(Number(line.qty));
         if (!product || !variant || variant.price === null || !(qty >= 1 && qty <= 10000)) return null;
+        if (requiresDesign(product.slug) && !line.designId) return null;
         // Lines without a color (e.g. from the Design Studio) get the product's default color.
         const color = colorOf(product, line.color);
         if (line.color && color?.id !== line.color) return null;

@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { getProduct } from "@/lib/catalog";
+import { requiresDesign } from "@/lib/design-config";
 
 export type CartLine = { slug: string; variant: string; color?: string; qty: number; designId?: string; preview?: string };
 
@@ -34,8 +35,10 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     try {
       const saved = JSON.parse(localStorage.getItem(KEY) ?? "[]");
-      // Drop lines whose product or option no longer exists, or is now price on request.
-      const valid = (l: CartLine) => getProduct(l.slug)?.variants.some((v) => v.id === l.variant && v.price !== null);
+      // Drop lines whose product or option no longer exists, or is now price on request,
+      // and lines for products that need a design but have none.
+      const valid = (l: CartLine) =>
+        getProduct(l.slug)?.variants.some((v) => v.id === l.variant && v.price !== null) && (!requiresDesign(l.slug) || !!l.designId);
       // eslint-disable-next-line react-hooks/set-state-in-effect -- hydrate from storage after mount
       if (Array.isArray(saved)) setLines(saved.filter(valid));
     } catch {}

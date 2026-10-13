@@ -70,6 +70,7 @@ export function Studio({ product, config, fonts, initial, initialVariant }: Stud
   const [zoom, setZoom] = useState(1);
   const zoomRef = useRef(1);
   const [previewBg, setPreviewBg] = useState("transparent");
+  const [needsDesign, setNeedsDesign] = useState(false);
 
   const dims = useCallback(
     (v: string): [number, number] => (config.kind === "flat" ? (config.dims[v] ?? config.size) : [1, 1]),
@@ -83,6 +84,7 @@ export function Studio({ product, config, fonts, initial, initialVariant }: Stud
     setHist({ undo: e.canUndo, redo: e.canRedo });
     setCounts((prev) => ({ ...prev, [side]: e.userObjects().length }));
     if (gang) setUsed(e.usedLengthIn());
+    if (e.userObjects().length > 0) setNeedsDesign(false);
   }, [side, gang]);
 
   const fit = useCallback(() => {
@@ -233,6 +235,23 @@ export function Studio({ product, config, fonts, initial, initialVariant }: Stud
     }
   }
 
+  /** True if any side has something on it. */
+  function hasDesign() {
+    const eng = engineRef.current;
+    const saved = Object.entries(sidesRef.current).some(([id, st]) => id !== side && st.objects.length > 0);
+    return saved || (eng?.userObjects().length ?? 0) > 0;
+  }
+
+  function addToCartClicked() {
+    if (!hasDesign()) {
+      setNeedsDesign(true);
+      return;
+    }
+    setNeedsDesign(false);
+    if (product.noQty) saveAndAdd([{ variant, qty: 1 }]);
+    else setCheckout(true);
+  }
+
   function changeZoom(next: number) {
     const z = Math.min(3, Math.max(0.5, Math.round(next * 100) / 100));
     zoomRef.current = z;
@@ -336,7 +355,7 @@ export function Studio({ product, config, fonts, initial, initialVariant }: Stud
   return (
     // A form with autoComplete off stops Firefox restoring controls' disabled state on reload,
     // which would break hydration. Nothing here submits.
-    <form autoComplete="off" onSubmit={(ev) => ev.preventDefault()} className={`grid gap-4 lg:gap-6 ${gang ? "lg:grid-cols-[17rem_1fr_16rem]" : "lg:grid-cols-[19rem_1fr_17rem]"}`}>
+    <form autoComplete="off" onSubmit={(ev) => ev.preventDefault()} className={`grid grid-cols-[minmax(0,1fr)] gap-4 lg:gap-6 ${gang ? "lg:grid-cols-[17rem_1fr_16rem]" : "lg:grid-cols-[19rem_1fr_17rem]"}`}>
       {/* Tools */}
       <aside className="order-2 rounded-2xl border border-line bg-white lg:order-1">
         <div className="grid grid-cols-4 border-b border-line text-xs font-semibold">
@@ -511,16 +530,18 @@ export function Studio({ product, config, fonts, initial, initialVariant }: Stud
 
       {/* Canvas */}
       <section className="order-1 min-w-0 lg:order-2">
-        <div className="mb-3 flex items-center justify-between gap-2">
-          <div className="flex gap-1">
-            <IconButton label="Undo" disabled={!hist.undo} onClick={() => e?.undo()} d="M9 14 4 9l5-5M4 9h11a5 5 0 0 1 0 10h-3" />
-            <IconButton label="Redo" disabled={!hist.redo} onClick={() => e?.redo()} d="m15 14 5-5-5-5M20 9H9a5 5 0 0 0 0 10h3" />
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-1">
+            <div className="flex gap-1">
+              <IconButton label="Undo" disabled={!hist.undo} onClick={() => e?.undo()} d="M9 14 4 9l5-5M4 9h11a5 5 0 0 1 0 10h-3" />
+              <IconButton label="Redo" disabled={!hist.redo} onClick={() => e?.redo()} d="m15 14 5-5-5-5M20 9H9a5 5 0 0 0 0 10h3" />
+            </div>
             {gang && (
               <select
                 value={variant}
                 disabled={!ready || !!busy}
                 onChange={(ev) => changeVariant(ev.target.value)}
-                className="field ml-1 w-auto py-1.5 pl-3 pr-8 text-sm font-medium"
+                className="field ml-1 w-auto min-w-0 max-w-full py-1.5 pl-3 pr-8 text-sm font-medium"
                 aria-label="Sheet size"
                 title="Sheet size"
               >
@@ -542,7 +563,7 @@ export function Studio({ product, config, fonts, initial, initialVariant }: Stud
             )}
           </div>
           {gang && (
-            <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-2">
+            <div className="flex w-full flex-wrap items-center justify-between gap-x-4 gap-y-2 sm:w-auto sm:justify-end">
               <div className="flex items-center gap-1" role="group" aria-label="Zoom">
                 <button type="button" onClick={() => changeZoom(zoomRef.current - 0.25)} disabled={zoom <= 0.5} aria-label="Zoom out" className="grid h-9 w-9 place-items-center rounded-lg border border-line bg-white text-lg text-navy hover:bg-mist disabled:opacity-40">−</button>
                 <button type="button" onClick={() => changeZoom(1)} title="Fit the sheet to the width" className="h-9 min-w-14 rounded-lg border border-line bg-white px-2 text-sm font-medium text-navy hover:bg-mist">
@@ -595,8 +616,8 @@ export function Studio({ product, config, fonts, initial, initialVariant }: Stud
         <div className="relative">
           <div
             ref={boxEl}
-            className={`grid min-h-[320px] rounded-2xl bg-mist p-2 ${
-              gang ? "max-h-[calc(100vh-11rem)] min-h-[60vh] place-items-start overflow-auto [scrollbar-gutter:stable]" : "place-items-center"
+            className={`grid rounded-2xl bg-mist p-2 ${
+              gang ? "max-h-[calc(100vh-11rem)] min-h-[12rem] place-items-start overflow-auto sm:min-h-[60vh] [scrollbar-gutter:stable]" : "min-h-[320px] place-items-center"
             }`}
           >
             {/* Rulers come after the canvas, so React only ever appends next to the wrapper Fabric puts it in. */}
@@ -820,9 +841,16 @@ export function Studio({ product, config, fonts, initial, initialVariant }: Stud
               <span className="ml-1 text-sm font-normal text-white/60">and up</span>
             </p>
           )}
-          <button type="button" disabled={!ready || !!busy} onClick={() => (product.noQty ? saveAndAdd([{ variant, qty: 1 }]) : setCheckout(true))} className="btn mt-4 w-full bg-magenta text-white hover:brightness-110">
+          <button type="button" disabled={!ready || !!busy} onClick={addToCartClicked} className="btn mt-4 w-full bg-magenta text-white hover:brightness-110">
             Add to cart
           </button>
+          {needsDesign && (
+            <p className="mt-3 rounded-lg bg-white/10 px-3 py-2 text-sm text-white" role="alert">
+              {gang
+                ? "Your sheet is empty. Upload your images and place them on the sheet before adding it to your cart."
+                : "Add some text or an image to your design first."}
+            </p>
+          )}
           <p className="mt-2 text-xs text-white/60">We&apos;ll send a proof before anything prints.</p>
         </div>
       </aside>

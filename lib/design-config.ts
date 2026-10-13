@@ -178,6 +178,12 @@ export function printSpec(config: DesignConfig, dims: [number, number] = [1, 1])
 
 export const isGang = (config: DesignConfig) => config.kind === "flat" && !!config.gang;
 
+/** Products that only make sense with a design (a gang sheet is the design), so they can't be ordered without one. */
+export const requiresDesign = (slug: string) => {
+  const config = configs[slug];
+  return !!config && isGang(config);
+};
+
 export function getDesignConfig(slug: string): DesignConfig | undefined {
   return configs[slug];
 }

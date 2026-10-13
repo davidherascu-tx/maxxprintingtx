@@ -1,11 +1,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getCategory, getProduct, products, productsIn } from "@/lib/catalog";
+import { formatPrice, fromPrice, getCategory, getProduct, products, productsIn } from "@/lib/catalog";
 import { ProductGrid } from "@/components/product-card";
 import { ColorImage, ColorProvider } from "@/components/product-color";
 import { AddToCart } from "@/components/add-to-cart";
-import { isDesignable } from "@/lib/design-config";
+import { isDesignable, requiresDesign } from "@/lib/design-config";
 
 export function generateStaticParams() {
   return products.map((p) => ({ slug: p.slug }));
@@ -50,7 +50,21 @@ export default async function ProductPage({ params }: { params: Promise<{ slug: 
             </>
           )}
 
-          {isDesignable(product) && (
+          {requiresDesign(product.slug) ? (
+            // No plain "Add to cart": the sheet is the design, so it's added from the studio once it has artwork.
+            <div className="mt-8">
+              <p className="text-3xl font-bold text-navy">
+                {formatPrice(fromPrice(product) ?? 0)}
+                <span className="ml-2 text-sm font-normal text-ink/50">for a 22&quot; x 12&quot; sheet · longer sheets cost more</span>
+              </p>
+              <Link href={`/design/${product.slug}`} className="btn-primary mt-6 w-full py-3.5">
+                Build your gang sheet
+              </Link>
+              <p className="mt-3 text-sm text-ink/60">
+                Upload your images, arrange them on the sheet and pick the length. You&apos;ll add it to your cart from the builder once it has a design.
+              </p>
+            </div>
+          ) : isDesignable(product) && (
             <Link
               href={`/design/${product.slug}`}
               className="mt-6 flex items-center justify-between gap-4 rounded-2xl border border-magenta/30 bg-magenta/5 p-4 transition hover:bg-magenta/10"
@@ -63,7 +77,7 @@ export default async function ProductPage({ params }: { params: Promise<{ slug: 
             </Link>
           )}
 
-          <AddToCart product={product} />
+          {!requiresDesign(product.slug) && <AddToCart product={product} />}
 
           {product.features.length > 0 && (
             <div className="mt-8 border-t border-line pt-6">
@@ -88,10 +102,12 @@ export default async function ProductPage({ params }: { params: Promise<{ slug: 
             </ul>
             </div>
           )}
+          {!requiresDesign(product.slug) && (
           <p className="mt-6 rounded-xl bg-mist p-4 text-sm text-ink/70">
             After you order, our team will reach out to collect your artwork and send a proof before printing.
             Bulk pricing available — <Link href="/contact" className="font-medium text-navy underline">contact us</Link>.
           </p>
+          )}
         </div>
         </div>
       </ColorProvider>
