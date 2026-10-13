@@ -31,7 +31,7 @@ Open http://localhost:3000.
 - Database: Neon Postgres. Run `db/schema.sql` once in the Neon SQL editor.
 - Files: private Neon Object Storage bucket named `files` (S3-compatible). Set `NEON_S3_ENDPOINT`, `NEON_S3_REGION`, `NEON_S3_ACCESS_KEY_ID`, `NEON_S3_SECRET_ACCESS_KEY` (create the bucket and a storage credential with the Neon CLI: `neon buckets create files`, `neon credentials create --scope storage:read --scope storage:write`).
 - Hosting: Cloudflare Workers via OpenNext (`wrangler.jsonc`, `open-next.config.ts`).
-- Secrets (set in Cloudflare → Workers → maxxprintingtx → Settings → Variables and Secrets): `DATABASE_URL`, the four `NEON_S3_*` values, `SESSION_SECRET`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`.
+- Secrets (set in Cloudflare → Workers → maxxprintingtx → Settings → Variables and Secrets): `DATABASE_URL`, the four `NEON_S3_*` values, `SESSION_SECRET`, `RESEND_API_KEY`, `EMAIL_FROM`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`.
 - `npm run preview` runs the Cloudflare build locally; `npm run deploy` ships it.
 
 ## Card payments (Stripe)
@@ -46,6 +46,16 @@ Open http://localhost:3000.
 4. Going live: switch Stripe to live mode, add a webhook endpoint `https://YOUR-DOMAIN/api/stripe/webhook` for the event `checkout.session.completed`, and set `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` in Cloudflare.
 
 An order is saved as "Awaiting payment" and only becomes a real order when Stripe confirms the exact amount (webhook or return page). A customer who leaves the payment page keeps the saved order and can use **Pay now** in their account. The tax rate lives in `lib/tax.ts`.
+
+## Email (Resend)
+
+Emails are sent through [Resend](https://resend.com) (`lib/email.ts`, plain HTTP API, works on Workers):
+
+- New accounts (optional, off by default): set `REQUIRE_EMAIL_ACTIVATION=true` to require an activation email before an account can sign in (signed link, 48 hours, tied to the email address; signing in or "Didn't get the activation email?" sends a new one, at most every 2 minutes; staff can resend or activate in Admin → Customers). Only turn it on once customers can receive email (verified domain); it stays off without `RESEND_API_KEY`.
+- Customer: order received (card payment, or marked paid/invoiced in the admin), proof ready, artwork needed, order ready for pickup.
+- Shop (the "Order notifications" email in Admin → Settings): new order, customer approved a proof, customer requested changes.
+
+Setup: create an API key in Resend and set `RESEND_API_KEY` and `EMAIL_FROM` in `.env.local` and in Cloudflare. Without a key, emails are skipped and logged, and new accounts are active straight away. In Resend test mode (no verified domain, sender `onboarding@resend.dev`) emails only reach your own Resend account email, so shop notifications work but customer emails (activation, confirmations, proofs) are refused; verify a domain in Resend to email customers. Shop notifications go to the "Order notifications" address in Admin → Settings, and customer replies go there too.
 
 ## Where things live
 

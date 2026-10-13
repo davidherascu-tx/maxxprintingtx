@@ -19,7 +19,7 @@ function Field({ name, label, value, type = "text", required, hint }: { name: st
 
 export default async function AdminSettings() {
   await requireStaff("/admin/settings");
-  const { site, taxRate, pickup, delivery } = await getSettings();
+  const { site, taxRate, pickup, delivery, notifyEmail } = await getSettings();
 
   return (
     <>
@@ -45,6 +45,18 @@ export default async function AdminSettings() {
               <Field name="state" label="State" value={site.address.state} />
               <Field name="zip" label="ZIP" value={site.address.zip} />
             </div>
+          </fieldset>
+
+          <fieldset className="grid gap-4 sm:grid-cols-2">
+            <legend className="mb-3 font-semibold text-navy">Order notifications</legend>
+            <Field
+              name="notifyEmail"
+              label="Email new orders and proof answers to"
+              type="email"
+              value={notifyEmail}
+              required
+              hint="Not shown on the website. Customer replies to shop emails also go here."
+            />
           </fieldset>
 
           <fieldset className="grid gap-4 sm:grid-cols-2">

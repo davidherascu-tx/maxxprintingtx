@@ -8,6 +8,8 @@ export type StoreSettings = {
   taxRate: number;
   pickup: { enabled: boolean; note: string };
   delivery: { enabled: boolean; note: string };
+  /** Where shop notifications (new orders, proof answers) are emailed. Not shown on the site. */
+  notifyEmail: string;
 };
 
 export const defaultSettings: StoreSettings = {
@@ -15,6 +17,7 @@ export const defaultSettings: StoreSettings = {
   taxRate: DEFAULT_TAX_RATE,
   pickup: { enabled: true, note: `${defaultSite.address.line1}, ${defaultSite.address.line2}, ${defaultSite.address.city}` },
   delivery: { enabled: true, note: "Delivery cost is quoted and invoiced separately" },
+  notifyEmail: "maxxprintingtx@shotokancenter.com",
 };
 
 /** Saved settings over the defaults, field by field, so a partial or older saved value still works. */
@@ -25,6 +28,7 @@ export function mergeSettings(saved: Partial<StoreSettings> | null | undefined):
     taxRate: typeof saved?.taxRate === "number" ? saved.taxRate : d.taxRate,
     pickup: { ...d.pickup, ...saved?.pickup },
     delivery: { ...d.delivery, ...saved?.delivery },
+    notifyEmail: typeof saved?.notifyEmail === "string" && saved.notifyEmail ? saved.notifyEmail : d.notifyEmail,
   };
 }
 

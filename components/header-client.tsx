@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { signOutAll } from "@/lib/actions";
 import { useCart } from "./cart";
 
@@ -80,6 +80,63 @@ export function MobileMenu({
             )}
           </div>
         </nav>
+      )}
+    </div>
+  );
+}
+
+/**
+ * "Hi, Name" (or "Admin" for staff who aren't signed in as a customer), opening a small
+ * menu with the account links and Sign out, so the header stays on one line.
+ */
+export function AccountMenu({ name, customer, staff }: { name?: string; customer: boolean; staff: boolean }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent | KeyboardEvent) => {
+      if (e instanceof KeyboardEvent ? e.key === "Escape" : !ref.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", close);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", close);
+    };
+  }, [open]);
+
+  const item = "block w-full whitespace-nowrap rounded-lg px-3 py-2 text-left text-sm hover:bg-mist";
+  return (
+    <div ref={ref} className="relative hidden sm:block">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        className="inline-flex items-center gap-2 whitespace-nowrap rounded-full px-3 py-2 text-sm font-medium hover:bg-mist"
+      >
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+          <circle cx="12" cy="8" r="4" />
+          <path d="M4 21c0-4 4-6 8-6s8 2 8 6" />
+        </svg>
+        {customer && name ? `Hi, ${name}` : "Admin"}
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden className={`transition ${open ? "rotate-180" : ""}`}>
+          <path d="m6 9 6 6 6-6" />
+        </svg>
+      </button>
+      {open && (
+        <div role="menu" className="absolute right-0 top-full z-50 mt-2 min-w-44 rounded-xl border border-line bg-white p-1.5 shadow-lg" onClick={(e) => (e.target as HTMLElement).closest("a") && setOpen(false)}>
+          {customer && (
+            <Link href="/account" role="menuitem" className={item}>My account</Link>
+          )}
+          {staff && (
+            <Link href="/admin" role="menuitem" className={`${item} font-semibold text-navy`}>Admin</Link>
+          )}
+          <form action={signOutAll} className="mt-1 border-t border-line pt-1">
+            <button type="submit" role="menuitem" className={`${item} text-ink/70 hover:text-magenta`}>Sign out</button>
+          </form>
+        </div>
       )}
     </div>
   );

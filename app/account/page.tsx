@@ -25,12 +25,12 @@ const statusColor: Record<string, string> = {
 export default async function AccountPage({
   searchParams,
 }: {
-  searchParams: Promise<{ order?: string; session_id?: string; cancelled?: string; payment_error?: string }>;
+  searchParams: Promise<{ order?: string; session_id?: string; cancelled?: string; payment_error?: string; activated?: string }>;
 }) {
   const user = await getCurrentUser();
   const catalog = await getCatalog();
   if (!user) redirect("/signin");
-  const { order: placed, session_id, cancelled, payment_error } = await searchParams;
+  const { order: placed, session_id, cancelled, payment_error, activated } = await searchParams;
   // Back from Stripe: confirm the payment here too, in case the webhook is a moment behind.
   if (session_id) await confirmCheckoutSession(session_id, user.id);
   const [orders, designs] = await Promise.all([ordersForUser(user.id), designsForUser(user.id)]);
@@ -57,6 +57,12 @@ export default async function AccountPage({
         </form>
       </div>
 
+      {activated && (
+        <div className="mt-8 rounded-2xl border border-cyan/40 bg-cyan/10 p-5 text-navy" role="status">
+          <p className="font-semibold">Your account is active. Welcome, {user.name.split(" ")[0]}!</p>
+          <p className="mt-1 text-sm text-navy/80">You&apos;re signed in and ready to order.</p>
+        </div>
+      )}
       {justPlaced && (
         <div className="mt-8 rounded-2xl border border-cyan/40 bg-cyan/10 p-5 text-navy" role="status">
           <ClearCart />

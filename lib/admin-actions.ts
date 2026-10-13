@@ -1,15 +1,18 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import type { Order } from "./db";
 import { baseProduct, type ProductOverride } from "./catalog";
 import { randomUUID } from "node:crypto";
 import { redirect } from "next/navigation";
 import {
-  adminUpdateUser, createStaff, deleteOverride, deleteStaff, findOrder, findStaffByEmail, findStaffById, findUserById, moveApproval, ORDER_STATUSES,
+  adminUpdateUser, createStaff, deleteOverride, deleteStaff, findOrder, findStaffByEmail, findStaffById, findUserById, markEmailVerified, moveApproval, ORDER_STATUSES,
   saveOverride, saveSettings, setOrderAdminNotes, setOrderPayment, setOrderStatus, setStaffPassword, setUserPassword, touchStaffLogin,
 } from "./db";
 import { endOfDayHouston } from "./dates";
 import { saveProofImage, sniffImage } from "./files";
+import { activationRequired, emailArtworkNeeded, emailOrderPlaced, emailOrderReady, emailProofReady } from "./email";
+import { sendActivationEmail } from "./verification";
 import { defaultSettings, mergeSettings, type StoreSettings } from "./settings";
 import { hashPassword, verifyPassword } from "./session";
 import { createStaffSession, deleteStaffSession, requireStaff } from "./staff-session";
@@ -37,6 +40,10 @@ export async function updateOrderStatus(form: FormData) {
   // Nothing goes to production before the artwork is approved.
   if (status !== "Received" && order.approval !== "approved") return;
   await setOrderStatus(order.id, status);
+  if (status === "Ready" && order.status !== "Ready") {
+    const customer = await findUserById(order.userId);
+    if (customer) await emailOrderReady(order, customer);
+  }
   revalidatePath("/admin", "layout");
   revalidatePath("/account");
 }
@@ -53,7 +60,13 @@ export async function recordPayment(form: FormData) {
   await requireStaff();
   const to = str(form, "to");
   if (to !== "paid" && to !== "invoice") return;
-  await setOrderPayment(str(form, "id"), to);
+  const id = str(form, "id");
+  // An unpaid order just became a real one: send the same emails as a card payment.
+  if (await setOrderPayment(id, to)) {
+    const order = await findOrder(id);
+    const customer = order && (await findUserById(order.userId));
+    if (order && customer) await emailOrderPlaced(order, customer);
+  }
   revalidatePath("/admin", "layout");
   revalidatePath("/account");
 }
@@ -61,6 +74,12 @@ export async function recordPayment(form: FormData) {
 // --- Artwork approval -----------------------------------------------------------------
 
 const MAX_PROOF_BYTES = 8 * 1000 * 1000;
+
+async function notifyCustomer(orderId: string, notify: (order: Order, customer: { name: string; email: string }) => Promise<void>) {
+  const order = await findOrder(orderId);
+  const customer = order && (await findUserById(order.userId));
+  if (order && customer) await notify(order, customer);
+}
 
 const revalidateOrder = () => {
   revalidatePath("/admin", "layout");
@@ -95,8 +114,9 @@ export async function sendProof(_: FormState, form: FormData): Promise<FormState
     image,
   });
   if (!sent) return { error: "This order can't get a proof right now (it may be approved already)." };
+  await notifyCustomer(id, (order, customer) => emailProofReady(order, customer, note));
   revalidateOrder();
-  return { ok: "Proof sent. The customer sees it in their account; let them know it's ready." };
+  return { ok: "Proof sent. The customer gets an email and sees it in their account." };
 }
 
 /** Staff can't use the artwork as is: tell the customer what's needed. */
@@ -111,8 +131,9 @@ export async function flagArtwork(_: FormState, form: FormData): Promise<FormSta
     note,
   });
   if (!moved) return { error: "This order's approval has already moved on. Reload the page." };
+  await notifyCustomer(str(form, "id"), (order, customer) => emailArtworkNeeded(order, customer, note));
   revalidateOrder();
-  return { ok: "Saved. The customer sees your message in their account." };
+  return { ok: "Saved. The customer gets your message by email and in their account." };
 }
 
 /** The customer sent what was needed: back to staff review. */
@@ -265,6 +286,24 @@ export async function updateCustomer(_: FormState, form: FormData): Promise<Form
   return { ok: "Customer saved." };
 }
 
+/** Activate a customer's account without the email link (e.g. they confirmed by phone). */
+export async function activateCustomer(form: FormData) {
+  await requireStaff();
+  const user = await findUserById(str(form, "id"));
+  if (user && !user.emailVerifiedAt) await markEmailVerified(user.id, user.email);
+  revalidatePath("/admin", "layout");
+}
+
+export async function resendCustomerActivation(_: FormState, form: FormData): Promise<FormState> {
+  await requireStaff();
+  const user = await findUserById(str(form, "id"));
+  if (!user) return { error: "Customer not found." };
+  if (user.emailVerifiedAt) return { error: "This account is already active." };
+  if (!activationRequired()) return { error: "Account activation is turned off." };
+  if (!(await sendActivationEmail(user))) return { error: "An activation email went out less than 2 minutes ago. Try again shortly." };
+  return { ok: `Activation email sent to ${user.email}.` };
+}
+
 /** Staff set a new password for a customer; their existing sessions are signed out. */
 export async function resetCustomerPassword(_: FormState, form: FormData): Promise<FormState> {
   await requireStaff();
@@ -368,6 +407,8 @@ export async function saveStoreSettings(_: FormState, form: FormData): Promise<F
   if (!EMAIL.test(email)) return { error: "Please enter a valid email." };
   const name = str(form, "name");
   if (name.length < 2) return { error: "Please enter the business name." };
+  const notifyEmail = str(form, "notifyEmail").toLowerCase();
+  if (!EMAIL.test(notifyEmail)) return { error: "Please enter a valid email for order notifications." };
   const pickup = form.get("pickupEnabled") === "on";
   const delivery = form.get("deliveryEnabled") === "on";
   if (!pickup && !delivery) return { error: "Turn on pickup, delivery or both, or customers can't check out." };
@@ -394,6 +435,7 @@ export async function saveStoreSettings(_: FormState, form: FormData): Promise<F
     taxRate: Math.round(taxPercent * 1000) / 100000,
     pickup: { enabled: pickup, note: str(form, "pickupNote") || defaultSettings.pickup.note },
     delivery: { enabled: delivery, note: str(form, "deliveryNote") || defaultSettings.delivery.note },
+    notifyEmail,
   });
   await saveSettings(next);
   revalidateShop();

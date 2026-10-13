@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState } from "react";
-import { signIn, signUp, updateProfile } from "@/lib/actions";
+import { useActionState, useState } from "react";
+import { resendActivation, signIn, signUp, updateProfile } from "@/lib/actions";
 
 function ErrorNote({ message }: { message?: string }) {
   if (!message) return null;
@@ -36,8 +36,50 @@ export function SignInForm({ next }: { next: string }) {
   );
 }
 
+/** Shown instead of the sign-up form once the activation email is on its way. */
+function CheckYourEmail({ message }: { message: string }) {
+  return (
+    <div className="space-y-4 text-center" role="status">
+      <div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-cyan/15 text-navy" aria-hidden>
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <rect x="3" y="5" width="18" height="14" rx="2" />
+          <path d="m3 7 9 6 9-6" />
+        </svg>
+      </div>
+      <p className="font-semibold text-navy">Check your email</p>
+      <p className="text-sm text-ink/70">{message}</p>
+      <p className="text-xs text-ink/50">Can&apos;t find it? Look in your spam or promotions folder. The link works for 48 hours.</p>
+      <Link href="/signin" className="btn-outline w-full">Back to sign in</Link>
+    </div>
+  );
+}
+
+/** "Didn't get the activation email?" on the sign-in page. */
+export function ResendActivation({ next }: { next: string }) {
+  const [open, setOpen] = useState(false);
+  const [state, action, pending] = useActionState(resendActivation, undefined);
+  if (!open) {
+    return (
+      <button type="button" onClick={() => setOpen(true)} className="w-full text-center text-sm text-ink/60 hover:text-navy hover:underline">
+        Didn&apos;t get the activation email?
+      </button>
+    );
+  }
+  return (
+    <form action={action} className="space-y-3 rounded-xl bg-mist p-4">
+      <input type="hidden" name="next" value={next} />
+      <label htmlFor="resend-email" className="label">Send a new activation link to</label>
+      <input id="resend-email" name="email" type="email" autoComplete="email" required className="field" />
+      <ErrorNote message={state?.error} />
+      {state?.ok && <p className="text-sm text-navy" role="status">{state.ok}</p>}
+      <button type="submit" disabled={pending} className="btn-outline w-full">{pending ? "Sending…" : "Send new link"}</button>
+    </form>
+  );
+}
+
 export function SignUpForm({ next }: { next: string }) {
   const [state, action, pending] = useActionState(signUp, undefined);
+  if (state?.ok) return <CheckYourEmail message={state.ok} />;
   return (
     <form action={action} className="space-y-4">
       <input type="hidden" name="next" value={next} />

@@ -3,10 +3,11 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { formatPrice } from "@/lib/catalog";
 import { designsForUser, findUserById, ordersForUser } from "@/lib/db";
-import { resetCustomerPassword, updateCustomer } from "@/lib/admin-actions";
+import { activateCustomer, resendCustomerActivation, resetCustomerPassword, updateCustomer } from "@/lib/admin-actions";
 import { requireStaff } from "@/lib/staff-session";
 import { getCatalog } from "@/lib/store";
-import { AdminForm } from "@/components/admin/admin-form";
+import { AdminForm, SubmitButton } from "@/components/admin/admin-form";
+import { activationRequired } from "@/lib/email";
 import { ApprovalBadge, SourceBadge } from "@/components/approval";
 import { designSource } from "@/lib/design-config";
 import { Card, date, dateTime, PageHeader, PaymentBadge, StatusBadge } from "@/components/admin/ui";
@@ -27,6 +28,7 @@ export default async function AdminCustomer({ params }: { params: Promise<{ id: 
       <Link href="/admin/customers" className="text-sm text-ink/60 hover:text-navy">← Customers</Link>
       <PageHeader title={user.name} />
       <p className="-mt-4 mb-6 text-sm text-ink/60">
+        {activationRequired() && !user.emailVerifiedAt && <span className="mr-2 rounded-full bg-yellow/30 px-2.5 py-0.5 text-xs font-semibold text-navy">Not activated</span>}
         Customer since {date(user.createdAt)} · {placed.length} {placed.length === 1 ? "order" : "orders"} · {formatPrice(spent)} paid
       </p>
 
@@ -105,6 +107,23 @@ export default async function AdminCustomer({ params }: { params: Promise<{ id: 
               </div>
             </AdminForm>
           </Card>
+
+          {activationRequired() && !user.emailVerifiedAt && (
+            <Card title="Account activation">
+              <p className="mb-3 text-sm text-ink/60">
+                {user.name} hasn&apos;t clicked the activation link yet, so they can&apos;t sign in.
+              </p>
+              <AdminForm action={resendCustomerActivation} submit="Resend activation email">
+                <input type="hidden" name="id" value={user.id} />
+              </AdminForm>
+              <form action={activateCustomer} className="mt-3 border-t border-line pt-3">
+                <input type="hidden" name="id" value={user.id} />
+                <SubmitButton confirm={`Activate ${user.name}'s account without the email link? Only do this if you know ${user.email} is really theirs.`}>
+                  Activate without email
+                </SubmitButton>
+              </form>
+            </Card>
+          )}
 
           <Card title="Set a new password">
             <p className="mb-3 text-sm text-ink/60">

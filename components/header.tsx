@@ -4,8 +4,7 @@ import { baseCategories as categories } from "@/lib/catalog";
 import { getCurrentUser } from "@/lib/session";
 import { getCurrentStaff } from "@/lib/staff-session";
 import { getSite } from "@/lib/store";
-import { signOutAll } from "@/lib/actions";
-import { CartButton, MobileMenu } from "./header-client";
+import { AccountMenu, CartButton, MobileMenu } from "./header-client";
 
 export async function Header() {
   const [user, staff, site] = await Promise.all([getCurrentUser(), getCurrentStaff(), getSite()]);
@@ -20,12 +19,12 @@ export async function Header() {
           </a>
         </div>
       </div>
-      <div className="container-x flex h-16 items-center gap-6">
+      <div className="container-x flex h-16 items-center gap-4 xl:gap-6">
         <MobileMenu categories={categories.map(({ slug, name }) => ({ slug, name }))} signedIn={!!user} staff={!!staff} />
         <Link href="/" className="shrink-0" aria-label={`${site.name} home`}>
           <Image src="/brand/logo.png" alt={site.name} width={359} height={200} priority className="h-10 w-auto" />
         </Link>
-        <nav className="hidden xl:flex items-center gap-5 text-sm font-medium text-ink/80">
+        <nav className="hidden xl:flex items-center gap-4 2xl:gap-5 whitespace-nowrap text-sm font-medium text-ink/80">
           <Link href="/shop" className="hover:text-navy">Shop all</Link>
           {categories.map((c) => (
             <Link key={c.slug} href={`/category/${c.slug}`} className="hover:text-navy whitespace-nowrap">
@@ -34,35 +33,20 @@ export async function Header() {
           ))}
           <Link href="/contact" className="hover:text-navy">Contact</Link>
         </nav>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex shrink-0 items-center gap-1 sm:gap-2">
           <Link
             href="/design"
-            className="hidden md:inline-flex items-center gap-2 rounded-full border border-magenta/30 px-4 py-2 text-sm font-semibold text-magenta hover:bg-magenta/5"
+            className="hidden md:inline-flex items-center gap-2 whitespace-nowrap rounded-full border border-magenta/30 px-4 py-2 text-sm font-semibold text-magenta hover:bg-magenta/5"
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
               <path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" />
             </svg>
             Design Studio
           </Link>
-          {staff && (
-            <Link href="/admin" className="hidden sm:inline-flex rounded-full px-3 py-2 text-sm font-semibold text-navy hover:bg-mist">
-              Admin
-            </Link>
-          )}
-          {user && (
-            <Link href="/account" className="hidden sm:inline-flex items-center gap-2 rounded-full px-3 py-2 text-sm font-medium hover:bg-mist">
-              <UserIcon />
-              {`Hi, ${user.name.split(" ")[0]}`}
-            </Link>
-          )}
           {user || staff ? (
-            <form action={signOutAll} className="hidden sm:block">
-              <button type="submit" className="rounded-full px-3 py-2 text-sm font-medium text-ink/70 hover:bg-mist hover:text-magenta">
-                Sign out
-              </button>
-            </form>
+            <AccountMenu name={user?.name.split(" ")[0]} customer={!!user} staff={!!staff} />
           ) : (
-            <Link href="/signin" className="hidden sm:inline-flex items-center gap-2 rounded-full px-3 py-2 text-sm font-medium hover:bg-mist">
+            <Link href="/signin" className="hidden sm:inline-flex items-center gap-2 whitespace-nowrap rounded-full px-3 py-2 text-sm font-medium hover:bg-mist">
               <UserIcon />
               Sign in
             </Link>

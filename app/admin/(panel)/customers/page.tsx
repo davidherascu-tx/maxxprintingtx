@@ -4,6 +4,7 @@ import { formatPrice } from "@/lib/catalog";
 import { searchCustomers } from "@/lib/db";
 import { requireStaff } from "@/lib/staff-session";
 import { Card, date, PageHeader, Pagination } from "@/components/admin/ui";
+import { activationRequired } from "@/lib/email";
 
 export const metadata: Metadata = { title: "Customers" };
 
@@ -11,6 +12,7 @@ export default async function AdminCustomers({ searchParams }: { searchParams: P
   await requireStaff("/admin/customers");
   const sp = await searchParams;
   const { customers, total, page, pages } = await searchCustomers({ q: sp.q, page: Number(sp.page) || 1 });
+  const activation = activationRequired();
 
   return (
     <>
@@ -41,6 +43,7 @@ export default async function AdminCustomers({ searchParams }: { searchParams: P
                   <tr key={c.id} className="hover:bg-mist/60">
                     <td className="px-5 py-2.5">
                       <Link href={`/admin/customers/${c.id}`} className="font-medium text-navy hover:underline">{c.name}</Link>
+                      {activation && !c.emailVerifiedAt && <span className="ml-2 rounded-full bg-yellow/30 px-2 py-0.5 text-[10px] font-semibold uppercase text-navy">Not activated</span>}
                       <span className="block text-xs text-ink/50">{c.email}{c.company && ` · ${c.company}`}</span>
                     </td>
                     <td className="px-2 py-2.5 text-ink/70">{c.phone ?? "—"}</td>

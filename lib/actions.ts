@@ -9,6 +9,8 @@ import {
 } from "./db";
 import { deleteDesignFiles } from "./files";
 import { deleteStaffSession } from "./staff-session";
+import { activationRequired, emailProofAnswer } from "./email";
+import { sendActivationEmail } from "./verification";
 import { createSession, deleteSession, getCurrentUser, hashPassword, verifyPassword } from "./session";
 import { colorOf } from "./catalog";
 import { getCatalog, getSettings } from "./store";
@@ -41,17 +43,42 @@ export async function signUp(_: FormState, form: FormData): Promise<FormState> {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { error: "Please enter a valid email." };
   if (password.length < 8) return { error: "Password must be at least 8 characters." };
 
+  const next = safeNext(str(form, "next"));
+  // Activation is optional (see activationRequired); when it's off, accounts are active straight away.
+  const confirm = activationRequired();
   const user = await createUser({
     name,
     email,
     phone: phone || undefined,
     company: company || undefined,
     passwordHash: await hashPassword(password),
+    verified: !confirm,
   });
-  if (!user) return { error: "An account with this email already exists." };
+  if (!user) {
+    // Signed up before but never confirmed: send the link again rather than a dead end.
+    const existing = await findUserByEmail(email);
+    if (confirm && existing && !existing.emailVerifiedAt) {
+      await sendActivationEmail(existing, next);
+      return { ok: `We've sent a new activation link to ${email}. Click it to finish creating your account.` };
+    }
+    return { error: "An account with this email already exists. Try signing in." };
+  }
 
-  await createSession(user.id);
-  redirect(safeNext(str(form, "next")));
+  if (!confirm) {
+    await createSession(user.id);
+    redirect(next);
+  }
+  await sendActivationEmail(user, next);
+  return { ok: `Almost done! We've sent an email to ${email}. Click the link in it to activate your account.` };
+}
+
+/** "Resend the activation email" on the sign-in page. Same answer whether or not the account exists. */
+export async function resendActivation(_: FormState, form: FormData): Promise<FormState> {
+  const email = str(form, "email").toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { error: "Please enter a valid email." };
+  const user = await findUserByEmail(email);
+  if (activationRequired() && user && !user.emailVerifiedAt) await sendActivationEmail(user, safeNext(str(form, "next")));
+  return { ok: "If that account still needs activating, we've sent a new link. Check your inbox and spam folder." };
 }
 
 export async function signIn(_: FormState, form: FormData): Promise<FormState> {
@@ -60,6 +87,14 @@ export async function signIn(_: FormState, form: FormData): Promise<FormState> {
   const user = await findUserByEmail(email);
   if (!user || !(await verifyPassword(password, user.passwordHash))) {
     return { error: "Incorrect email or password." };
+  }
+  if (activationRequired() && !user.emailVerifiedAt) {
+    const sent = await sendActivationEmail(user, safeNext(str(form, "next")));
+    return {
+      error: sent
+        ? `Please activate your account first. We've just sent a new activation link to ${email}.`
+        : `Please activate your account first using the link we emailed to ${email}. (Check your spam folder.)`,
+    };
   }
   await createSession(user.id);
   redirect(safeNext(str(form, "next")));
@@ -230,7 +265,8 @@ export async function approveProof(form: FormData) {
   if (!user) redirect("/signin");
   const order = await findOrder(str(form, "id"));
   if (!order || order.userId !== user.id) return;
-  await moveApproval(order.id, ["proof_sent"], "approved", { actor: "customer", actorName: user.name, kind: "approved", note: "" });
+  const moved = await moveApproval(order.id, ["proof_sent"], "approved", { actor: "customer", actorName: user.name, kind: "approved", note: "" });
+  if (moved) await emailProofAnswer(order, user, true, "");
   revalidatePath("/account");
   revalidatePath("/admin", "layout");
 }
@@ -245,6 +281,7 @@ export async function requestProofChanges(_: FormState, form: FormData): Promise
   if (note.length < 3) return { error: "Please tell us what to change." };
   const moved = await moveApproval(order.id, ["proof_sent"], "changes_requested", { actor: "customer", actorName: user.name, kind: "changes_requested", note });
   if (!moved) return { error: "This proof can't be changed anymore. Please call us." };
+  await emailProofAnswer(order, user, false, note);
   revalidatePath("/account");
   revalidatePath("/admin", "layout");
   return { ok: "Thanks! We'll update your proof and send a new one." };

@@ -1,6 +1,7 @@
 import "server-only";
 import Stripe from "stripe";
-import { findOrder, markOrderPaid, setOrderSession, type Order } from "./db";
+import { findOrder, findUserById, markOrderPaid, setOrderSession, type Order } from "./db";
+import { emailOrderPlaced } from "./email";
 import { getSettings } from "./store";
 import { taxLabel } from "./tax";
 
@@ -62,8 +63,13 @@ export async function startCheckout(order: Order, email: string, origin: string)
 export async function settleSession(session: Stripe.Checkout.Session) {
   const orderId = session.metadata?.order_id;
   if (!orderId || session.payment_status !== "paid" || session.amount_total === null) return null;
-  const paid = await markOrderPaid(orderId, session.id, session.amount_total);
+  const { paid, justPaid } = await markOrderPaid(orderId, session.id, session.amount_total);
   if (!paid) console.error("Stripe payment could not be matched to an unpaid order", orderId, session.id);
+  if (justPaid) {
+    const order = await findOrder(orderId);
+    const customer = order && (await findUserById(order.userId));
+    if (order && customer) await emailOrderPlaced(order, customer);
+  }
   return paid ? orderId : null;
 }
 

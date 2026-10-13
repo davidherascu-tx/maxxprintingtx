@@ -86,3 +86,9 @@ CREATE TABLE IF NOT EXISTS order_events (
   image text
 );
 CREATE INDEX IF NOT EXISTS order_events_order_idx ON order_events (order_id, at);
+
+-- Email confirmation: new accounts must click the link in the activation email before signing in.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified_at timestamptz;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_sent_at timestamptz;
+-- Accounts made before confirmation existed stay active.
+UPDATE users SET email_verified_at = created_at WHERE email_verified_at IS NULL AND verification_sent_at IS NULL AND created_at < '2026-10-14';

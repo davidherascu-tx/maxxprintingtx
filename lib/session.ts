@@ -4,6 +4,7 @@ import { createHmac, randomBytes, scrypt, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 import { cache } from "react";
 import { findUserById } from "./db";
+import { activationRequired } from "./email";
 
 export const SESSION_COOKIE = "maxx_session";
 const MAX_AGE = 60 * 60 * 24 * 30; // 30 days
@@ -36,7 +37,8 @@ function sign(value: string) {
   return createHmac("sha256", secret()).update(value).digest("base64url");
 }
 
-type TokenKind = "customer" | "staff";
+/** "verify": the link in an account activation email. */
+type TokenKind = "customer" | "staff" | "verify";
 
 /** A signed, expiring token for a customer or staff session. */
 export function encodeToken(kind: TokenKind, id: string, maxAgeSeconds: number) {
@@ -85,6 +87,7 @@ export const getCurrentUser = cache(async () => {
   if (!user) return null;
   // Staff reset this password after the session was created: sign it out.
   if (user.passwordChangedAt && session.iat < Date.parse(user.passwordChangedAt)) return null;
+  if (!user.emailVerifiedAt && activationRequired()) return null;
   return { id: user.id, name: user.name, email: user.email, phone: user.phone, company: user.company, createdAt: user.createdAt };
 });
 

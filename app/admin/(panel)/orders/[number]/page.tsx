@@ -65,7 +65,7 @@ export default async function AdminOrder({ params }: Props) {
               </div>
               {order.approval !== "approved" && (
                 <p className="mb-4 rounded-lg bg-yellow/20 px-3 py-2 text-xs text-navy">
-                  The website doesn&apos;t email customers yet: after sending a proof or a message, let the customer know by email or phone.
+                  The customer gets an email when you send a proof or ask for artwork (if email is set up), and staff get one when they answer.
                 </p>
               )}
 

@@ -14,6 +14,8 @@ export type User = {
   company?: string;
   /** When the password was last set by staff; older sessions are signed out. */
   passwordChangedAt?: string;
+  /** Set when the customer clicks the link in the activation email. Unconfirmed accounts can't sign in. */
+  emailVerifiedAt?: string;
   createdAt: string;
 };
 
@@ -100,6 +102,7 @@ const toUser = (r: Row): User => ({
   phone: r.phone ?? undefined,
   company: r.company ?? undefined,
   passwordChangedAt: r.password_changed_at ? iso(r.password_changed_at) : undefined,
+  emailVerifiedAt: r.email_verified_at ? iso(r.email_verified_at) : undefined,
   createdAt: iso(r.created_at),
 });
 
@@ -145,10 +148,11 @@ export async function findUserById(id: string) {
 }
 
 /** Returns null if the email is already registered. */
-export async function createUser(input: Omit<User, "id" | "createdAt" | "passwordChangedAt">) {
+export async function createUser(input: Omit<User, "id" | "createdAt" | "passwordChangedAt" | "emailVerifiedAt"> & { verified: boolean }) {
   const [row] = await sql`
-    INSERT INTO users (id, name, email, password_hash, phone, company)
-    VALUES (${randomUUID()}, ${input.name}, ${input.email}, ${input.passwordHash}, ${input.phone ?? null}, ${input.company ?? null})
+    INSERT INTO users (id, name, email, password_hash, phone, company, email_verified_at)
+    VALUES (${randomUUID()}, ${input.name}, ${input.email}, ${input.passwordHash}, ${input.phone ?? null}, ${input.company ?? null},
+      ${input.verified ? new Date().toISOString() : null})
     ON CONFLICT (email) DO NOTHING
     RETURNING *`;
   return row ? toUser(row) : null;
@@ -229,12 +233,14 @@ export async function deleteUnpaidOrder(id: string) {
  * for. Safe to call twice (the webhook and the return page both do). Returns whether it is paid.
  */
 export async function markOrderPaid(id: string, sessionId: string, amountCents: number) {
-  if (!UUID.test(id)) return false;
-  await sql`
+  if (!UUID.test(id)) return { paid: false, justPaid: false };
+  const updated = await sql`
     UPDATE orders SET payment_status = 'paid', paid_at = now(), stripe_session_id = ${sessionId}
-    WHERE id = ${id} AND payment_status = 'unpaid' AND round((subtotal + tax) * 100) = ${amountCents}`;
+    WHERE id = ${id} AND payment_status = 'unpaid' AND round((subtotal + tax) * 100) = ${amountCents}
+    RETURNING id`;
   const [row] = await sql`SELECT payment_status FROM orders WHERE id = ${id}`;
-  return row?.payment_status === "paid";
+  /** justPaid: this call is the one that marked it paid (so confirmation emails go out once). */
+  return { paid: row?.payment_status === "paid", justPaid: updated.length > 0 };
 }
 
 export async function findDesign(id: string) {
@@ -441,13 +447,17 @@ export async function setOrderAdminNotes(id: string, notes: string) {
  * Record a payment taken outside Stripe (cash, check, invoice). An order is never moved back to
  * unpaid: unpaid orders are deleted when the customer starts a new checkout.
  */
+/** Returns whether the order was unpaid until now (i.e. it has just become a placed order). */
 export async function setOrderPayment(id: string, to: "paid" | "invoice") {
-  if (!UUID.test(id)) return;
-  if (to === "paid") {
-    await sql`UPDATE orders SET payment_status = 'paid', paid_at = COALESCE(paid_at, now()) WHERE id = ${id} AND payment_status IN ('unpaid', 'invoice')`;
-  } else {
-    await sql`UPDATE orders SET payment_status = 'invoice' WHERE id = ${id} AND payment_status = 'unpaid'`;
-  }
+  if (!UUID.test(id)) return false;
+  const rows =
+    to === "paid"
+      ? await sql`
+          UPDATE orders o SET payment_status = 'paid', paid_at = COALESCE(o.paid_at, now())
+          FROM orders before WHERE o.id = ${id} AND before.id = o.id AND o.payment_status IN ('unpaid', 'invoice')
+          RETURNING before.payment_status AS was`
+      : await sql`UPDATE orders SET payment_status = 'invoice' WHERE id = ${id} AND payment_status = 'unpaid' RETURNING 'unpaid' AS was`;
+  return rows[0]?.was === "unpaid";
 }
 
 export type CustomerRow = User & { orders: number; spent: number; lastOrder?: string };
@@ -624,4 +634,31 @@ export async function moveApproval(
     INSERT INTO order_events (id, order_id, actor, actor_name, kind, note, image)
     VALUES (${randomUUID()}, ${orderId}, ${event.actor}, ${event.actorName}, ${event.kind}, ${event.note}, ${event.image ?? null})`;
   return true;
+}
+
+// ---------------------------------------------------------------------------
+// Email confirmation (account activation)
+// ---------------------------------------------------------------------------
+
+/** Activate an account. Only works while the email is still the one the link was sent to. */
+export async function markEmailVerified(id: string, email: string) {
+  if (!UUID.test(id)) return undefined;
+  const [row] = await sql`
+    UPDATE users SET email_verified_at = COALESCE(email_verified_at, now())
+    WHERE id = ${id} AND email = ${email.toLowerCase()} RETURNING *`;
+  return row ? toUser(row) : undefined;
+}
+
+/**
+ * Note that an activation email is going out. Returns false if one went out in the last
+ * two minutes, so the button (or someone else) can't flood an inbox.
+ */
+export async function claimVerificationEmail(id: string) {
+  if (!UUID.test(id)) return false;
+  const rows = await sql`
+    UPDATE users SET verification_sent_at = now()
+    WHERE id = ${id} AND email_verified_at IS NULL
+      AND (verification_sent_at IS NULL OR verification_sent_at < now() - interval '2 minutes')
+    RETURNING id`;
+  return rows.length > 0;
 }
