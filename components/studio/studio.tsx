@@ -18,6 +18,18 @@ const COLORS = [
   "#facc15", "#ffd200", "#f97316", "#dc2626", "#ec008c", "#7c3aed", "#6b7280", "#b8860b",
 ];
 
+const RULER_PX = 24;
+// Colors a gang sheet can be previewed on: transparent, and common shirt colors.
+const PREVIEW_BGS: [string, string][] = [
+  ["transparent", "Transparent"],
+  ["#ffffff", "White"],
+  ["#111111", "Black"],
+  ["#1f3a93", "Royal blue"],
+  ["#b91c1c", "Red"],
+  ["#9ca3af", "Gray"],
+];
+type RulerInfo = ReturnType<StudioEngine["rulerInfo"]>;
+
 export type StudioProps = {
   product: Pick<Product, "slug" | "name" | "variants" | "variantLabel" | "optionLabel" | "noQty">;
   config: DesignConfig;
@@ -54,6 +66,10 @@ export function Studio({ product, config, fonts, initial, initialVariant }: Stud
   const [library, setLibrary] = useState<{ url: string; name: string }[]>([]);
   const [used, setUsed] = useState(0);
   const [copies, setCopies] = useState(10);
+  const [ruler, setRuler] = useState<RulerInfo | null>(null);
+  const [zoom, setZoom] = useState(1);
+  const zoomRef = useRef(1);
+  const [previewBg, setPreviewBg] = useState("transparent");
 
   const dims = useCallback(
     (v: string): [number, number] => (config.kind === "flat" ? (config.dims[v] ?? config.size) : [1, 1]),
@@ -73,7 +89,9 @@ export function Studio({ product, config, fonts, initial, initialVariant }: Stud
     const box = boxEl.current;
     if (!box || !engineRef.current) return;
     // Gang sheets fill the width (minus padding) and scroll; everything else fits the window.
-    engineRef.current.fit(gang ? box.clientWidth - 16 : box.clientWidth, Math.max(320, window.innerHeight - 260));
+    // The rulers take RULER_PX on the top and left of a gang sheet.
+    engineRef.current.fit(gang ? box.clientWidth - 16 - RULER_PX : box.clientWidth, Math.max(320, window.innerHeight - 260), zoomRef.current);
+    if (gang) setRuler(engineRef.current.rulerInfo());
   }, [gang]);
 
   // Create the engine once.
@@ -215,6 +233,18 @@ export function Studio({ product, config, fonts, initial, initialVariant }: Stud
     }
   }
 
+  function changeZoom(next: number) {
+    const z = Math.min(3, Math.max(0.5, Math.round(next * 100) / 100));
+    zoomRef.current = z;
+    setZoom(z);
+    fit();
+  }
+
+  function changePreviewBg(color: string) {
+    setPreviewBg(color);
+    engineRef.current?.setPreviewBackground(color);
+  }
+
   async function addCopies(n: number) {
     const made = (await engineRef.current?.copies(n)) ?? 0;
     if (made < n) setError(made === 0 ? "No room left on the sheet. Choose a longer sheet size." : `Only ${made} of ${n} copies fit. Choose a longer sheet size for more.`);
@@ -306,7 +336,7 @@ export function Studio({ product, config, fonts, initial, initialVariant }: Stud
   return (
     // A form with autoComplete off stops Firefox restoring controls' disabled state on reload,
     // which would break hydration. Nothing here submits.
-    <form autoComplete="off" onSubmit={(ev) => ev.preventDefault()} className="grid gap-4 lg:grid-cols-[19rem_1fr_17rem] lg:gap-6">
+    <form autoComplete="off" onSubmit={(ev) => ev.preventDefault()} className={`grid gap-4 lg:gap-6 ${gang ? "lg:grid-cols-[17rem_1fr_16rem]" : "lg:grid-cols-[19rem_1fr_17rem]"}`}>
       {/* Tools */}
       <aside className="order-2 rounded-2xl border border-line bg-white lg:order-1">
         <div className="grid grid-cols-4 border-b border-line text-xs font-semibold">
@@ -486,6 +516,20 @@ export function Studio({ product, config, fonts, initial, initialVariant }: Stud
             <IconButton label="Undo" disabled={!hist.undo} onClick={() => e?.undo()} d="M9 14 4 9l5-5M4 9h11a5 5 0 0 1 0 10h-3" />
             <IconButton label="Redo" disabled={!hist.redo} onClick={() => e?.redo()} d="m15 14 5-5-5-5M20 9H9a5 5 0 0 0 0 10h3" />
             {gang && (
+              <select
+                value={variant}
+                disabled={!ready || !!busy}
+                onChange={(ev) => changeVariant(ev.target.value)}
+                className="field ml-1 w-auto py-1.5 pl-3 pr-8 text-sm font-medium"
+                aria-label="Sheet size"
+                title="Sheet size"
+              >
+                {product.variants.map((v) => (
+                  <option key={v.id} value={v.id}>{v.label} · {formatPrice(v.price ?? 0)}</option>
+                ))}
+              </select>
+            )}
+            {gang && (
               <button
                 type="button"
                 disabled={!ready || !!busy || (counts[side] ?? 0) === 0}
@@ -497,6 +541,40 @@ export function Studio({ product, config, fonts, initial, initialVariant }: Stud
               </button>
             )}
           </div>
+          {gang && (
+            <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-2">
+              <div className="flex items-center gap-1" role="group" aria-label="Zoom">
+                <button type="button" onClick={() => changeZoom(zoomRef.current - 0.25)} disabled={zoom <= 0.5} aria-label="Zoom out" className="grid h-9 w-9 place-items-center rounded-lg border border-line bg-white text-lg text-navy hover:bg-mist disabled:opacity-40">−</button>
+                <button type="button" onClick={() => changeZoom(1)} title="Fit the sheet to the width" className="h-9 min-w-14 rounded-lg border border-line bg-white px-2 text-sm font-medium text-navy hover:bg-mist">
+                  {zoom === 1 ? "Fit" : `${Math.round(zoom * 100)}%`}
+                </button>
+                <button type="button" onClick={() => changeZoom(zoomRef.current + 0.25)} disabled={zoom >= 3} aria-label="Zoom in" className="grid h-9 w-9 place-items-center rounded-lg border border-line bg-white text-lg text-navy hover:bg-mist disabled:opacity-40">+</button>
+              </div>
+              <div className="flex items-center gap-1.5" role="group" aria-label="Preview background" title="Only changes how the sheet looks here. The print file stays transparent.">
+                <span className="text-xs text-ink/50">Preview on</span>
+                {PREVIEW_BGS.map(([c, label]) => (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => changePreviewBg(c)}
+                    aria-label={`${label} background`}
+                    aria-pressed={previewBg === c}
+                    title={label}
+                    className={`h-6 w-6 rounded-full border border-black/15 ${previewBg === c ? "ring-2 ring-navy ring-offset-1" : ""}`}
+                    style={{ background: c === "transparent" ? "repeating-conic-gradient(#e8ebf0 0 25%, #fff 0 50%) 0 0 / 10px 10px" : c }}
+                  />
+                ))}
+                <label className="relative grid h-6 w-6 cursor-pointer place-items-center overflow-hidden rounded-full border border-black/15 bg-[conic-gradient(red,yellow,lime,cyan,blue,magenta,red)]" aria-label="Custom background color" title="Custom color">
+                  <input
+                    type="color"
+                    value={previewBg.startsWith("#") ? previewBg : "#ffffff"}
+                    onChange={(ev) => changePreviewBg(ev.target.value)}
+                    className="absolute inset-0 cursor-pointer opacity-0"
+                  />
+                </label>
+              </div>
+            </div>
+          )}
           {config.sides.length > 1 && (
             <div className="flex rounded-full bg-mist p-1 text-sm font-medium">
               {config.sides.map((s) => (
@@ -518,10 +596,14 @@ export function Studio({ product, config, fonts, initial, initialVariant }: Stud
           <div
             ref={boxEl}
             className={`grid min-h-[320px] rounded-2xl bg-mist p-2 ${
-              gang ? "max-h-[calc(100vh-14rem)] place-items-start justify-center overflow-y-auto [scrollbar-gutter:stable]" : "place-items-center"
+              gang ? "max-h-[calc(100vh-11rem)] min-h-[60vh] place-items-start overflow-auto [scrollbar-gutter:stable]" : "place-items-center"
             }`}
           >
-            <canvas ref={canvasEl} />
+            {/* Rulers come after the canvas, so React only ever appends next to the wrapper Fabric puts it in. */}
+            <div className="relative mx-auto" style={gang ? { paddingLeft: RULER_PX, paddingTop: RULER_PX } : undefined}>
+              <canvas ref={canvasEl} />
+              <Ruler info={gang ? ruler : null} />
+            </div>
           </div>
           {(!ready || busy) && (
             <div className="absolute inset-0 grid place-items-center rounded-2xl bg-white/70 text-sm font-medium text-navy backdrop-blur-sm">
@@ -531,7 +613,7 @@ export function Studio({ product, config, fonts, initial, initialVariant }: Stud
         </div>
         <p className="mt-2 text-center text-xs text-ink/50">
           {gang ? (
-            <>Scroll to see the whole sheet. Designs outside the checkered sheet won&apos;t be printed.</>
+            <>Scroll to see the whole sheet. Designs outside the sheet won&apos;t be printed. The preview color is only for viewing: it prints on transparent film.</>
           ) : e && e.bleedPx > 0 ? (
             <>
               Blue line = final trimmed size · pink line = keep text inside · pink shaded edge = bleed: stretch backgrounds all the way out to it.
@@ -773,6 +855,41 @@ export function Studio({ product, config, fonts, initial, initialVariant }: Stud
         />
       )}
     </form>
+  );
+}
+
+/** Inch rulers along the top and left edges of a gang sheet, drawn to match the canvas scale. */
+function Ruler({ info }: { info: RulerInfo | null }) {
+  if (!info) return null;
+  const { ppi, left, top, widthIn, heightIn, canvasWidth, canvasHeight } = info;
+  // Label every 1, 2, 5 or 10 inches, whichever keeps the numbers from touching.
+  const every = [1, 2, 5, 10].find((n) => n * ppi >= 26) ?? 10;
+  const ticks = (len: number) =>
+    Array.from({ length: Math.floor(len) + 1 }, (_, i) => ({ i, major: i % every === 0 }));
+  const x = (i: number) => RULER_PX + left + i * ppi;
+  const y = (i: number) => RULER_PX + top + i * ppi;
+  const cls = "pointer-events-none absolute select-none fill-ink/55 text-[9px] text-ink/45";
+
+  return (
+    <>
+      <svg className={cls} style={{ left: 0, top: 0 }} width={canvasWidth + RULER_PX} height={RULER_PX} aria-hidden>
+        <text x={2} y={RULER_PX - 8} className="text-[8px]">in</text>
+        {ticks(widthIn).map(({ i, major }) => (
+          <g key={i}>
+            <line x1={x(i)} x2={x(i)} y1={RULER_PX - (major ? 9 : 4)} y2={RULER_PX} stroke="currentColor" strokeWidth="1" />
+            {major && <text x={x(i) + 2} y={RULER_PX - 11}>{i}</text>}
+          </g>
+        ))}
+      </svg>
+      <svg className={cls} style={{ left: 0, top: 0 }} width={RULER_PX} height={canvasHeight + RULER_PX} aria-hidden>
+        {ticks(heightIn).map(({ i, major }) => (
+          <g key={i}>
+            <line y1={y(i)} y2={y(i)} x1={RULER_PX - (major ? 9 : 4)} x2={RULER_PX} stroke="currentColor" strokeWidth="1" />
+            {major && i > 0 && <text x={1} y={y(i) - 2}>{i}</text>}
+          </g>
+        ))}
+      </svg>
+    </>
   );
 }
 

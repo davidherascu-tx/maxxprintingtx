@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getDesignConfig, designableProduct } from "@/lib/design-config";
+import { getDesignConfig, designableProduct, isGang } from "@/lib/design-config";
 import { designFontClasses, designFonts } from "@/lib/design-fonts";
 import { readDesignFile } from "@/lib/files";
 import { Studio, type StudioProps } from "@/components/studio/studio";
@@ -38,7 +38,8 @@ export default async function DesignStudioPage({
   const initial = await loadDesign(design, slug);
 
   return (
-    <div className="container-x py-6">
+    // Gang sheets are long and need room, so the studio runs wider than the rest of the site.
+    <div className={isGang(config) ? "mx-auto w-full max-w-[112rem] px-4 py-6 sm:px-6" : "container-x py-6"}>
       {/* Make every studio font's @font-face available to the canvas. */}
       <div aria-hidden className="pointer-events-none absolute h-0 overflow-hidden opacity-0">
         {designFontClasses.map((c) => (

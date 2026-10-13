@@ -57,6 +57,8 @@ export class StudioEngine {
   logical = { width: MOCKUP_SIZE, height: MOCKUP_SIZE };
   widthIn = 12;
   background = "#ffffff";
+  /** Gang sheets: the color the sheet is shown on. Preview only, never printed (DTF prints on film). */
+  previewBg = "transparent";
   /** Production rules for the current side and size. */
   spec: PrintSpec;
   /** Bleed zone width in logical pixels (0 when the product has none). */
@@ -208,7 +210,7 @@ export class StudioEngine {
     for (const g of this.guides) c.add(g);
   }
 
-  private makeArtboard(fill = this.background) {
+  private makeArtboard(fill = this.gang ? this.previewBg : this.background) {
     return this.outline(this.bleedPx, {
       fill: fill === "transparent" ? this.checker() : fill,
       shadow: new this.f.Shadow({ color: "rgba(2,36,91,0.18)", blur: 18, offsetY: 4 }),
@@ -229,6 +231,12 @@ export class StudioEngine {
     return new this.f.Pattern({ source: tile, repeat: "repeat" });
   }
 
+  setPreviewBackground(color: string) {
+    this.previewBg = color;
+    this.canvas.backgroundImage = this.makeArtboard();
+    this.canvas.requestRenderAll();
+  }
+
   setBackground(color: string) {
     if (this.config.kind !== "flat") return;
     this.background = color;
@@ -238,10 +246,10 @@ export class StudioEngine {
   }
 
   /** Scale the canvas element to fit the available box. */
-  fit(maxWidth: number, maxHeight: number) {
-    // Gang sheets fill the width and scroll vertically.
+  fit(maxWidth: number, maxHeight: number, zoom = 1) {
+    // Gang sheets fill the width (times `zoom`) and scroll.
     const z = this.gang
-      ? Math.min(maxWidth / this.logical.width, 1.2)
+      ? Math.min((maxWidth / this.logical.width) * zoom, 4)
       : Math.min(maxWidth / this.logical.width, maxHeight / this.logical.height, 1.6);
     this.canvas.setDimensions({ width: Math.floor(this.logical.width * z), height: Math.floor(this.logical.height * z) });
     this.canvas.setZoom(z);
@@ -296,7 +304,7 @@ export class StudioEngine {
 
   /** A text color that stands out against the current flat background. */
   contrastColor() {
-    const m = /^#([0-9a-f]{6})$/i.exec(this.background);
+    const m = /^#([0-9a-f]{6})$/i.exec(this.gang ? this.previewBg : this.background);
     if (!m) return "#02245b";
     const n = parseInt(m[1], 16);
     const lum = (0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255;
@@ -458,6 +466,21 @@ export class StudioEngine {
     this.canvas.requestRenderAll();
     this.commit();
     this.onChange();
+  }
+
+  /** Where the sheet sits on screen, for drawing rulers around it. Lengths are in screen pixels. */
+  rulerInfo() {
+    const z = this.canvas.getZoom();
+    return {
+      /** Screen pixels per inch of sheet. */
+      ppi: this.pxPerIn * z,
+      left: this.area.left * z,
+      top: this.area.top * z,
+      widthIn: this.area.width / this.pxPerIn,
+      heightIn: this.area.height / this.pxPerIn,
+      canvasWidth: Math.floor(this.logical.width * z),
+      canvasHeight: Math.floor(this.logical.height * z),
+    };
   }
 
   /** Length of the sheet taken up by artwork, in inches. */
