@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { colorOf, formatPrice, type Product } from "@/lib/catalog";
+import { Price } from "./price";
 import { useCart } from "./cart";
 import { useColor } from "./product-color";
 import { VariantPicker } from "./variant-picker";
@@ -24,7 +25,7 @@ export function AddToCart({ product }: { product: Product }) {
           <span className="text-2xl font-bold text-navy">Price on request</span>
         ) : (
           <>
-            <span className="text-3xl font-bold text-navy">{formatPrice(variant.price)}</span>
+            <span className="text-3xl font-bold text-navy"><Price price={variant.price} compareAt={variant.compareAt} className="" /></span>
             <span className="text-sm text-ink/50">each</span>
           </>
         )}

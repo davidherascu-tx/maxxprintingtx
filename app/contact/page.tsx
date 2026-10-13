@@ -1,9 +1,11 @@
 import type { Metadata } from "next";
-import { mapsUrl, site } from "@/lib/site";
+import { fullAddress, mapsUrl } from "@/lib/site";
+import { getSite } from "@/lib/store";
 
 export const metadata: Metadata = { title: "Contact us" };
 
-export default function ContactPage() {
+export default async function ContactPage() {
+  const site = await getSite();
   const cards = [
     {
       title: "Visit us",
@@ -14,7 +16,7 @@ export default function ContactPage() {
           {site.address.city}, {site.address.state} {site.address.zip}
         </>
       ),
-      href: mapsUrl,
+      href: mapsUrl(site),
       cta: "Get directions",
       color: "bg-cyan",
     },
@@ -46,10 +48,8 @@ export default function ContactPage() {
       </div>
       <div className="mt-10 overflow-hidden rounded-2xl border border-line">
         <iframe
-          title="Map to Maxx Marketing Agency"
-          src={`https://www.google.com/maps?q=${encodeURIComponent(
-            `${site.address.line1} ${site.address.line2}, ${site.address.city}, ${site.address.state} ${site.address.zip}`,
-          )}&output=embed`}
+          title={`Map to ${site.name}`}
+          src={`https://www.google.com/maps?q=${encodeURIComponent(fullAddress(site))}&output=embed`}
           className="h-80 w-full"
           loading="lazy"
         />

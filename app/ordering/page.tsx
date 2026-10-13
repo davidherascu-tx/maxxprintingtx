@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { site } from "@/lib/site";
+import { getSettings } from "@/lib/store";
+import { taxLabel } from "@/lib/tax";
 
 export const metadata: Metadata = {
   title: "Ordering & delivery",
@@ -30,7 +31,7 @@ const steps = [
   },
 ];
 
-const faqs = [
+const faqTemplate = [
   {
     q: "When do I pay?",
     a: "At checkout, by credit or debit card. We send a proof afterwards, and nothing prints until you approve it.",
@@ -45,7 +46,7 @@ const faqs = [
   },
   {
     q: "Is sales tax included in the prices on the website?",
-    a: "No. Prices on the website don't include tax. Sales tax (8.25%) is added at checkout.",
+    a: "No. Prices on the website don't include tax. Sales tax (TAX%) is added at checkout.",
   },
   {
     q: "Can I change my order after placing it?",
@@ -57,7 +58,10 @@ const faqs = [
   },
 ];
 
-export default function OrderingPage() {
+export default async function OrderingPage() {
+  const { site, taxRate } = await getSettings();
+  const tax = taxLabel(taxRate);
+  const faqs = faqTemplate.map((f) => ({ ...f, a: f.a.replace("TAX%", tax) }));
   return (
     <div className="container-x py-12">
       <h1 className="font-display text-4xl text-navy">Ordering & delivery</h1>
@@ -83,7 +87,7 @@ export default function OrderingPage() {
           <p className="mt-2 text-ink/70">Your order total at checkout shows:</p>
           <ul className="mt-4 space-y-2 text-sm text-ink/80">
             <li className="flex gap-2"><span className="text-magenta">●</span> Your products, quantities and prices</li>
-            <li className="flex gap-2"><span className="text-magenta">●</span> Texas sales tax (8.25%)</li>
+            <li className="flex gap-2"><span className="text-magenta">●</span> Texas sales tax ({tax})</li>
             <li className="flex gap-2"><span className="text-magenta">●</span> The final total, paid securely by card</li>
           </ul>
           <p className="mt-4 text-sm text-ink/60">Local delivery, if you choose it, is quoted and invoiced separately.</p>

@@ -1,13 +1,20 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getDesignConfig, designableProduct, isGang } from "@/lib/design-config";
+import { getDesignConfig, isDesignable, isGang } from "@/lib/design-config";
 import { designFontClasses, designFonts } from "@/lib/design-fonts";
 import { readDesignFile } from "@/lib/files";
 import { Studio, type StudioProps } from "@/components/studio/studio";
+import { getCatalog } from "@/lib/store";
+
+/** A visible product that has a design studio. */
+async function designableProduct(slug: string) {
+  const product = (await getCatalog()).getProduct(slug);
+  return product && isDesignable(product) ? product : undefined;
+}
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
-  const product = designableProduct((await params).slug);
+  const product = await designableProduct((await params).slug);
   return product ? { title: `Design your ${product.name}` } : {};
 }
 
@@ -32,7 +39,7 @@ export default async function DesignStudioPage({
 }) {
   const { slug } = await params;
   const { design, variant } = await searchParams;
-  const product = designableProduct(slug);
+  const product = await designableProduct(slug);
   const config = getDesignConfig(slug);
   if (!product || !config) notFound();
   const initial = await loadDesign(design, slug);

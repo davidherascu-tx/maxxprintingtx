@@ -41,3 +41,48 @@ CREATE TABLE IF NOT EXISTS orders (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS orders_user_idx ON orders (user_id);
+
+-- Admin backend. Safe to run again on an existing database.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS password_changed_at timestamptz;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS admin_notes text NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS orders_created_idx ON orders (created_at DESC);
+
+-- Admin edits to products defined in lib/catalog.ts (price, name, hidden...), keyed by slug.
+CREATE TABLE IF NOT EXISTS product_overrides (
+  slug text PRIMARY KEY,
+  data jsonb NOT NULL,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- Store settings edited in Admin → Settings (business info, tax rate, fulfillment).
+CREATE TABLE IF NOT EXISTS settings (
+  key text PRIMARY KEY,
+  value jsonb NOT NULL,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- Staff logins for /admin, separate from customer accounts. Create the first one with
+-- `npm run admin:create`; add more in Admin → Staff.
+CREATE TABLE IF NOT EXISTS staff (
+  id uuid PRIMARY KEY,
+  name text NOT NULL,
+  email text NOT NULL UNIQUE,
+  password_hash text NOT NULL,
+  password_changed_at timestamptz,
+  last_login_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- Artwork approval: staff review, proof to the customer, customer approves or asks for changes.
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS approval text NOT NULL DEFAULT 'review';
+CREATE TABLE IF NOT EXISTS order_events (
+  id uuid PRIMARY KEY,
+  order_id uuid NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  at timestamptz NOT NULL DEFAULT now(),
+  actor text NOT NULL,
+  actor_name text NOT NULL,
+  kind text NOT NULL,
+  note text NOT NULL DEFAULT '',
+  image text
+);
+CREATE INDEX IF NOT EXISTS order_events_order_idx ON order_events (order_id, at);

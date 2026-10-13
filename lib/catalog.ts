@@ -9,7 +9,15 @@ export type Category = {
  * `price: null` means "price on request": shown, but can't be added to the cart.
  * `group`/`option` split choices into two rows, e.g. size then pack.
  */
-export type Variant = { id: string; label: string; price: number | null; group?: string; option?: string };
+export type Variant = {
+  id: string;
+  label: string;
+  price: number | null;
+  group?: string;
+  option?: string;
+  /** Set while the option is on sale: the regular price, shown crossed out next to `price`. */
+  compareAt?: number;
+};
 
 /** A color option: its own photo, and a swatch for the picker. */
 /** `swatch` is any CSS background: a color, or a gradient for patterns. */
@@ -36,9 +44,12 @@ export type Product = {
   /** No quantity picker: each option (e.g. a pack) is bought once. */
   noQty?: boolean;
   featured?: boolean;
+  /** When the current sale ends (ISO), if a sale with an end date is running. */
+  saleEndsAt?: string;
 };
 
-export const categories: Category[] = [
+/** Categories and products as defined in code. Admin edits are layered on top by `makeCatalog`. */
+export const baseCategories: Category[] = [
   {
     slug: "apparel",
     name: "Apparel",
@@ -124,7 +135,7 @@ const gangSheetSizes = (): Variant[] =>
     };
   });
 
-export const products: Product[] = [
+export const baseProducts: Product[] = [
   // DTF Transfers
   {
     slug: "dtf-gang-sheet",
@@ -525,12 +536,22 @@ export const products: Product[] = [
   },
 ];
 
-export const getCategory = (slug: string) => categories.find((c) => c.slug === slug);
-export const getProduct = (slug: string) => products.find((p) => p.slug === slug);
+/** A product as defined in code, ignoring admin edits. Only for things admins can't change (e.g. option ids). */
+export const baseProduct = (slug: string) => baseProducts.find((p) => p.slug === slug);
+
 /** The chosen color, or the product's default color (undefined if it has none). */
 export const colorOf = (product: Product, id?: string) =>
   product.colors?.find((c) => c.id === id) ?? product.colors?.[0];
-export const productsIn = (category: string) => products.filter((p) => p.category === category);
+/** Lowest regular (pre-sale) price, to show crossed out next to `fromPrice` during a sale. */
+export const fromRegularPrice = (p: Pick<Product, "variants">) => {
+  const prices = p.variants.flatMap((v) => (v.price === null ? [] : [v.compareAt ?? v.price]));
+  return prices.length ? Math.min(...prices) : null;
+};
+
+/** e.g. "Oct 31": the last day of a sale, in Houston time. */
+export const saleEndLabel = (iso: string) =>
+  new Date(Date.parse(iso) - 1000).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "America/Chicago" });
+
 /** Lowest listed price, or null if every option is price on request. */
 export const fromPrice = (p: Pick<Product, "variants">) => {
   const prices = p.variants.flatMap((v) => (v.price === null ? [] : [v.price]));
@@ -539,3 +560,75 @@ export const fromPrice = (p: Pick<Product, "variants">) => {
 
 export const formatPrice = (n: number) =>
   n.toLocaleString("en-US", { style: "currency", currency: "USD" });
+
+/**
+ * Admin edits to a code-defined product, stored in the database. Only changed fields are kept,
+ * so later changes to the code defaults still show through. Option ids and labels can't be
+ * changed, because orders and design files refer to them.
+ */
+export type ProductOverride = {
+  name?: string;
+  description?: string;
+  hidden?: boolean;
+  featured?: boolean;
+  /** Per option id: a new price (null = price on request), a sale price, and/or hidden. */
+  variants?: Record<string, { price?: number | null; salePrice?: number; hidden?: boolean }>;
+  /** Sale prices apply until this moment (ISO); no date means until staff remove them. */
+  saleEndsAt?: string;
+};
+export type Overrides = Record<string, ProductOverride>;
+
+export type CatalogProduct = Product & { hidden: boolean; onSale: boolean };
+
+/** Whether a product's sale prices apply at `now` (ms). */
+export const saleRunning = (o: ProductOverride, now: number) => !o.saleEndsAt || now < Date.parse(o.saleEndsAt);
+
+/** Apply admin overrides to one product at time `now`. Hidden options are dropped. */
+function applyOverride(base: Product, o: ProductOverride | undefined, now: number): CatalogProduct {
+  if (!o) return { ...base, hidden: false, onSale: false };
+  const running = saleRunning(o, now);
+  const variants = base.variants.flatMap((v): Variant[] => {
+    const vo = o.variants?.[v.id];
+    if (vo?.hidden) return [];
+    const price = vo && vo.price !== undefined ? vo.price : v.price;
+    // A sale only counts if it's below a real price.
+    if (running && vo?.salePrice !== undefined && price !== null && vo.salePrice < price) {
+      return [{ ...v, price: vo.salePrice, compareAt: price }];
+    }
+    return [{ ...v, price }];
+  });
+  const onSale = variants.some((v) => v.compareAt !== undefined);
+  return {
+    ...base,
+    name: o.name ?? base.name,
+    description: o.description ?? base.description,
+    featured: o.featured ?? base.featured,
+    variants,
+    ...(onSale && o.saleEndsAt && { saleEndsAt: o.saleEndsAt }),
+    onSale,
+    // A product with every option hidden can't be shown or bought.
+    hidden: !!o.hidden || variants.length === 0,
+  };
+}
+
+/**
+ * The catalog customers see at time `now` (ms): code products with admin overrides applied
+ * and hidden ones left out. Pass the same `now` on server and client so sales match.
+ */
+export function makeCatalog(overrides: Overrides = {}, now = Date.now()) {
+  const all = baseProducts.map((p) => applyOverride(p, overrides[p.slug], now));
+  const products = all.filter((p) => !p.hidden);
+  return {
+    categories: baseCategories,
+    /** Every product including hidden ones, for staff. */
+    all,
+    products,
+    getCategory: (slug: string) => baseCategories.find((c) => c.slug === slug),
+    /** A visible product, or undefined if it doesn't exist or is hidden. */
+    getProduct: (slug: string) => products.find((p) => p.slug === slug),
+    /** Any product, hidden or not (e.g. to name an item in an old order). */
+    findProduct: (slug: string) => all.find((p) => p.slug === slug),
+    productsIn: (category: string) => products.filter((p) => p.category === category),
+  };
+}
+export type Catalog = ReturnType<typeof makeCatalog>;

@@ -2,12 +2,17 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { colorOf, formatPrice, getProduct } from "@/lib/catalog";
-import { calcTax, TAX_LABEL } from "@/lib/tax";
+import { colorOf, formatPrice } from "@/lib/catalog";
+import { calcTax, taxLabel } from "@/lib/tax";
 import { linePrice, useCart } from "./cart";
+import { useCatalog, useStoreSettings } from "./store";
+import { Price } from "./price";
 
 export function CartView() {
   const { lines, ready, subtotal, setQty, remove } = useCart();
+  const catalog = useCatalog();
+  const { taxRate } = useStoreSettings();
+  const tax = calcTax(subtotal, taxRate);
 
   if (!ready) return <div className="mt-8 h-40 animate-pulse rounded-2xl bg-mist" />;
 
@@ -24,7 +29,7 @@ export function CartView() {
     <div className="mt-8 grid gap-8 lg:grid-cols-[1fr_22rem]">
       <ul className="divide-y divide-line rounded-2xl border border-line">
         {lines.map((line) => {
-          const product = getProduct(line.slug)!;
+          const product = catalog.getProduct(line.slug)!;
           const variant = product.variants.find((v) => v.id === line.variant);
           const color = colorOf(product, line.color);
           const image = color?.image ?? product.image;
@@ -54,7 +59,7 @@ export function CartView() {
                       </Link>
                     )}
                   </div>
-                  <span className="font-semibold text-navy">{formatPrice(linePrice(line) * line.qty)}</span>
+                  <span className="text-right"><Price price={linePrice(catalog, line) * line.qty} compareAt={variant?.compareAt !== undefined ? variant.compareAt * line.qty : undefined} /></span>
                 </div>
                 <div className="mt-auto flex items-center gap-4 pt-3">
                   {!product.noQty && (
@@ -78,8 +83,8 @@ export function CartView() {
         <h2 className="font-semibold text-navy">Order summary</h2>
         <dl className="mt-4 space-y-2 text-sm">
           <div className="flex justify-between"><dt>Subtotal</dt><dd className="font-semibold">{formatPrice(subtotal)}</dd></div>
-          <div className="flex justify-between text-ink/60"><dt>Sales tax ({TAX_LABEL})</dt><dd>{formatPrice(calcTax(subtotal))}</dd></div>
-          <div className="flex justify-between border-t border-line pt-2 font-semibold text-navy"><dt>Total</dt><dd>{formatPrice(subtotal + calcTax(subtotal))}</dd></div>
+          <div className="flex justify-between text-ink/60"><dt>Sales tax ({taxLabel(taxRate)})</dt><dd>{formatPrice(tax)}</dd></div>
+          <div className="flex justify-between border-t border-line pt-2 font-semibold text-navy"><dt>Total</dt><dd>{formatPrice(subtotal + tax)}</dd></div>
           <p className="text-xs text-ink/50">Local delivery is quoted separately. <Link href="/ordering" className="underline hover:text-navy">How it works</Link></p>
         </dl>
         <Link href="/checkout" className="btn-primary mt-6 w-full">Checkout</Link>

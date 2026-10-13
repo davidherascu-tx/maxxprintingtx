@@ -36,14 +36,17 @@ function sign(value: string) {
   return createHmac("sha256", secret()).update(value).digest("base64url");
 }
 
-function encode(userId: string) {
-  const payload = Buffer.from(
-    JSON.stringify({ uid: userId, exp: Date.now() + MAX_AGE * 1000 }),
-  ).toString("base64url");
+type TokenKind = "customer" | "staff";
+
+/** A signed, expiring token for a customer or staff session. */
+export function encodeToken(kind: TokenKind, id: string, maxAgeSeconds: number) {
+  const now = Date.now();
+  const payload = Buffer.from(JSON.stringify({ k: kind, uid: id, iat: now, exp: now + maxAgeSeconds * 1000 })).toString("base64url");
   return `${payload}.${sign(payload)}`;
 }
 
-function decode(token: string | undefined): string | null {
+/** Verify a token and that it is of the expected kind, so a customer cookie can never open the admin. */
+export function decodeToken(token: string | undefined, kind: TokenKind): { uid: string; iat: number } | null {
   if (!token) return null;
   const [payload, sig] = token.split(".");
   if (!payload || !sig) return null;
@@ -51,15 +54,17 @@ function decode(token: string | undefined): string | null {
   const given = Buffer.from(sig);
   if (expected.length !== given.length || !timingSafeEqual(expected, given)) return null;
   try {
-    const { uid, exp } = JSON.parse(Buffer.from(payload, "base64url").toString());
-    return typeof uid === "string" && exp > Date.now() ? uid : null;
+    const { k, uid, iat, exp } = JSON.parse(Buffer.from(payload, "base64url").toString());
+    // Customer sessions from before `k` and `iat` were added: kind customer, issued at time 0.
+    if ((k ?? "customer") !== kind) return null;
+    return typeof uid === "string" && exp > Date.now() ? { uid, iat: typeof iat === "number" ? iat : 0 } : null;
   } catch {
     return null;
   }
 }
 
 export async function createSession(userId: string) {
-  (await cookies()).set(SESSION_COOKIE, encode(userId), {
+  (await cookies()).set(SESSION_COOKIE, encodeToken("customer", userId, MAX_AGE), {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
@@ -74,16 +79,13 @@ export async function deleteSession() {
 
 /** The signed-in user (without password hash), or null. Cached per request. */
 export const getCurrentUser = cache(async () => {
-  const uid = decode((await cookies()).get(SESSION_COOKIE)?.value);
-  if (!uid) return null;
-  const user = await findUserById(uid);
+  const session = decodeToken((await cookies()).get(SESSION_COOKIE)?.value, "customer");
+  if (!session) return null;
+  const user = await findUserById(session.uid);
   if (!user) return null;
+  // Staff reset this password after the session was created: sign it out.
+  if (user.passwordChangedAt && session.iat < Date.parse(user.passwordChangedAt)) return null;
   return { id: user.id, name: user.name, email: user.email, phone: user.phone, company: user.company, createdAt: user.createdAt };
 });
 
-/** Staff accounts are listed by email in ADMIN_EMAILS (comma-separated). */
-export function isAdmin(user: { email: string } | null) {
-  if (!user) return false;
-  const list = (process.env.ADMIN_EMAILS ?? "").split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
-  return list.includes(user.email.toLowerCase());
-}
+export type CurrentUser = NonNullable<Awaited<ReturnType<typeof getCurrentUser>>>;

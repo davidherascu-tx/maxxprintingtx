@@ -2,7 +2,8 @@ import { findDesign } from "@/lib/db";
 import { CUT_MARGIN_IN, flatDims, getDesignConfig, printSpec } from "@/lib/design-config";
 import { designFileType, isPublicDesignFile, readDesignFile } from "@/lib/files";
 import { buildPrintPdf } from "@/lib/pdf";
-import { getCurrentUser, isAdmin } from "@/lib/session";
+import { getCurrentUser } from "@/lib/session";
+import { getCurrentStaff } from "@/lib/staff-session";
 
 export const maxDuration = 60;
 
@@ -34,9 +35,9 @@ export async function GET(request: Request, ctx: RouteContext<"/api/designs/[id]
 
   // Print, cut and PDF files are production files: only staff and the design's owner may download them.
   if (!publicFile) {
-    const user = await getCurrentUser();
-    const design = user ? await findDesign(id) : undefined;
-    const allowed = !!user && (isAdmin(user) || (!!design && design.userId === user.id));
+    const [staff, user] = await Promise.all([getCurrentStaff(), getCurrentUser()]);
+    const design = !staff && user ? await findDesign(id) : undefined;
+    const allowed = !!staff || (!!user && !!design && design.userId === user.id);
     if (!allowed) return new Response("Not found", { status: 404 });
   }
 

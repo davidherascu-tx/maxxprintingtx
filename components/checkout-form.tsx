@@ -3,13 +3,23 @@
 import Link from "next/link";
 import { useActionState, useState } from "react";
 import { placeOrder } from "@/lib/actions";
-import { colorOf, formatPrice, getProduct } from "@/lib/catalog";
-import { calcTax, TAX_LABEL } from "@/lib/tax";
+import { colorOf, formatPrice } from "@/lib/catalog";
+import { calcTax, taxLabel } from "@/lib/tax";
 import { linePrice, useCart } from "./cart";
+import { useCatalog, useStoreSettings } from "./store";
 
 export function CheckoutForm() {
   const { lines, ready, subtotal } = useCart();
-  const [fulfillment, setFulfillment] = useState<"pickup" | "delivery">("pickup");
+  const catalog = useCatalog();
+  const { taxRate, pickup, delivery } = useStoreSettings();
+  const options = (
+    [
+      ["pickup", "Store pickup", pickup],
+      ["delivery", "Local delivery", delivery],
+    ] as const
+  ).filter(([, , o]) => o.enabled);
+  const [fulfillment, setFulfillment] = useState<"pickup" | "delivery">(options[0]?.[0] ?? "pickup");
+  const tax = calcTax(subtotal, taxRate);
   const [state, action, pending] = useActionState(placeOrder, undefined);
 
   if (!ready) return <div className="mt-8 h-40 animate-pulse rounded-2xl bg-mist" />;
@@ -33,12 +43,10 @@ export function CheckoutForm() {
         <fieldset className="rounded-2xl border border-line p-6">
           <legend className="px-2 font-semibold text-navy">Fulfillment</legend>
           <div className="grid gap-3 sm:grid-cols-2">
-            {(
-              [
-                ["pickup", "Store pickup", "12655 Woodforest Blvd, Ste 100, Houston"],
-                ["delivery", "Local delivery", "Delivery cost is quoted and invoiced separately"],
-              ] as const
-            ).map(([value, title, text]) => (
+            {options.length === 0 && (
+              <p className="text-sm text-magenta sm:col-span-2">Online ordering is paused right now. Please call us to place your order.</p>
+            )}
+            {options.map(([value, title, { note: text }]) => (
               <label
                 key={value}
                 className={`cursor-pointer rounded-xl border p-4 transition ${
@@ -80,7 +88,7 @@ export function CheckoutForm() {
         <h2 className="font-semibold text-navy">Order summary</h2>
         <ul className="mt-4 space-y-3 text-sm">
           {lines.map((l) => {
-            const p = getProduct(l.slug)!;
+            const p = catalog.getProduct(l.slug)!;
             const color = colorOf(p, l.color);
             return (
               <li key={`${l.slug}-${l.variant}-${l.color ?? ""}-${l.designId ?? ""}`} className="flex justify-between gap-3">
@@ -92,7 +100,7 @@ export function CheckoutForm() {
                     {l.designId && " · custom design"}
                   </span>
                 </span>
-                <span className="font-medium">{formatPrice(linePrice(l) * l.qty)}</span>
+                <span className="font-medium">{formatPrice(linePrice(catalog, l) * l.qty)}</span>
               </li>
             );
           })}
@@ -102,8 +110,8 @@ export function CheckoutForm() {
           <span>{formatPrice(subtotal)}</span>
         </div>
         <div className="mt-2 flex justify-between text-sm text-ink/60">
-          <span>Sales tax ({TAX_LABEL})</span>
-          <span>{formatPrice(calcTax(subtotal))}</span>
+          <span>Sales tax ({taxLabel(taxRate)})</span>
+          <span>{formatPrice(tax)}</span>
         </div>
         {fulfillment === "delivery" && (
           <div className="mt-2 flex justify-between text-sm text-ink/60">
@@ -113,14 +121,14 @@ export function CheckoutForm() {
         )}
         <div className="mt-3 flex justify-between border-t border-line pt-3 text-lg font-bold text-navy">
           <span>Total</span>
-          <span>{formatPrice(subtotal + calcTax(subtotal))}</span>
+          <span>{formatPrice(subtotal + tax)}</span>
         </div>
         <p className="mt-2 text-xs text-ink/50">
           You&apos;ll pay securely by card on the next page (powered by Stripe). We send a proof before anything prints.{" "}
           <Link href="/ordering" className="underline hover:text-navy">How it works</Link>
         </p>
         {state?.error && <p className="mt-4 rounded-lg bg-magenta/10 px-3 py-2 text-sm text-magenta">{state.error}</p>}
-        <button type="submit" disabled={pending} className="btn-primary mt-6 w-full">
+        <button type="submit" disabled={pending || options.length === 0} className="btn-primary mt-6 w-full">
           {pending ? "Redirecting to payment…" : "Continue to payment"}
         </button>
       </aside>

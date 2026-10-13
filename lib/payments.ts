@@ -1,7 +1,8 @@
 import "server-only";
 import Stripe from "stripe";
 import { findOrder, markOrderPaid, setOrderSession, type Order } from "./db";
-import { TAX_LABEL } from "./tax";
+import { getSettings } from "./store";
+import { taxLabel } from "./tax";
 
 // Card payments through Stripe Checkout (hosted page). Needs STRIPE_SECRET_KEY, and
 // STRIPE_WEBHOOK_SECRET for the webhook at /api/stripe/webhook.
@@ -24,6 +25,7 @@ const cents = (n: number) => Math.round(n * 100);
 /** Create a Checkout Session for an unpaid order and return the page to send the customer to. */
 export async function startCheckout(order: Order, email: string, origin: string) {
   const currency = "usd";
+  const { taxRate } = await getSettings();
   const session = await stripe().checkout.sessions.create({
     mode: "payment",
     client_reference_id: order.id,
@@ -41,7 +43,7 @@ export async function startCheckout(order: Order, email: string, origin: string)
         };
       }),
       ...(order.tax > 0
-        ? [{ quantity: 1, price_data: { currency, unit_amount: cents(order.tax), product_data: { name: `Sales tax (${TAX_LABEL})` } } }]
+        ? [{ quantity: 1, price_data: { currency, unit_amount: cents(order.tax), product_data: { name: `Sales tax (${taxLabel(taxRate)})` } } }]
         : []),
     ],
     metadata: { order_id: order.id, order_number: order.number },

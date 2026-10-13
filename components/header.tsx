@@ -1,15 +1,17 @@
 import Image from "next/image";
 import Link from "next/link";
-import { categories } from "@/lib/catalog";
-import { getCurrentUser, isAdmin } from "@/lib/session";
-import { site } from "@/lib/site";
+import { baseCategories as categories } from "@/lib/catalog";
+import { getCurrentUser } from "@/lib/session";
+import { getCurrentStaff } from "@/lib/staff-session";
+import { getSite } from "@/lib/store";
+import { signOutAll } from "@/lib/actions";
 import { CartButton, MobileMenu } from "./header-client";
 
 export async function Header() {
-  const user = await getCurrentUser();
+  const [user, staff, site] = await Promise.all([getCurrentUser(), getCurrentStaff(), getSite()]);
 
   return (
-    <header className="sticky top-0 z-40 bg-white/95 backdrop-blur border-b border-line">
+    <header className="print:hidden sticky top-0 z-40 bg-white/95 backdrop-blur border-b border-line">
       <div className="bg-navy text-white text-xs">
         <div className="container-x flex h-8 items-center justify-between gap-4">
           <span className="truncate">{site.tagline}</span>
@@ -19,7 +21,7 @@ export async function Header() {
         </div>
       </div>
       <div className="container-x flex h-16 items-center gap-6">
-        <MobileMenu categories={categories.map(({ slug, name }) => ({ slug, name }))} signedIn={!!user} />
+        <MobileMenu categories={categories.map(({ slug, name }) => ({ slug, name }))} signedIn={!!user} staff={!!staff} />
         <Link href="/" className="shrink-0" aria-label={`${site.name} home`}>
           <Image src="/brand/logo.png" alt={site.name} width={359} height={200} priority className="h-10 w-auto" />
         </Link>
@@ -42,18 +44,29 @@ export async function Header() {
             </svg>
             Design Studio
           </Link>
-          {isAdmin(user) && (
+          {staff && (
             <Link href="/admin" className="hidden sm:inline-flex rounded-full px-3 py-2 text-sm font-semibold text-navy hover:bg-mist">
-              Orders
+              Admin
             </Link>
           )}
-          <Link
-            href={user ? "/account" : "/signin"}
-            className="hidden sm:inline-flex items-center gap-2 rounded-full px-3 py-2 text-sm font-medium hover:bg-mist"
-          >
-            <UserIcon />
-            {user ? `Hi, ${user.name.split(" ")[0]}` : "Sign in"}
-          </Link>
+          {user && (
+            <Link href="/account" className="hidden sm:inline-flex items-center gap-2 rounded-full px-3 py-2 text-sm font-medium hover:bg-mist">
+              <UserIcon />
+              {`Hi, ${user.name.split(" ")[0]}`}
+            </Link>
+          )}
+          {user || staff ? (
+            <form action={signOutAll} className="hidden sm:block">
+              <button type="submit" className="rounded-full px-3 py-2 text-sm font-medium text-ink/70 hover:bg-mist hover:text-magenta">
+                Sign out
+              </button>
+            </form>
+          ) : (
+            <Link href="/signin" className="hidden sm:inline-flex items-center gap-2 rounded-full px-3 py-2 text-sm font-medium hover:bg-mist">
+              <UserIcon />
+              Sign in
+            </Link>
+          )}
           <CartButton />
         </div>
       </div>

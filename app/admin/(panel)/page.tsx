@@ -1,141 +1,129 @@
 import type { Metadata } from "next";
-import { notFound, redirect } from "next/navigation";
-import { allOrders, findDesign, ORDER_STATUSES } from "@/lib/db";
-import { updateOrderStatus } from "@/lib/actions";
-import { formatPrice, getProduct } from "@/lib/catalog";
-import { flatDims, getDesignConfig, isGang, printSpec } from "@/lib/design-config";
-import { getCurrentUser, isAdmin } from "@/lib/session";
+import Link from "next/link";
+import { formatPrice } from "@/lib/catalog";
+import { dashboardStats, ORDER_STATUSES, searchOrders } from "@/lib/db";
+import { requireStaff } from "@/lib/staff-session";
+import { Card, PageHeader, StatusBadge } from "@/components/admin/ui";
+import { OrderTable } from "@/components/admin/order-table";
+import { ApprovalBadge } from "@/components/approval";
+import type { Approval } from "@/lib/db";
+import { RevenueChart, type Day } from "@/components/admin/revenue-chart";
 
-export const metadata: Metadata = { title: "Orders", robots: { index: false } };
+export const metadata: Metadata = { title: "Dashboard" };
 
-const statusColor: Record<string, string> = {
-  Received: "bg-cyan/15 text-navy",
-  "In production": "bg-yellow/30 text-navy",
-  Ready: "bg-magenta/15 text-magenta",
-  Completed: "bg-mist text-ink/60",
-};
+/** The last 30 days (Houston time) as YYYY-MM-DD, oldest first, with days without sales filled in. */
+function last30(data: Day[]): Day[] {
+  const byDay = new Map(data.map((d) => [d.day, d]));
+  return Array.from({ length: 30 }, (_, i) => {
+    const key = new Date(Date.now() - (29 - i) * 86_400_000).toLocaleDateString("en-CA", { timeZone: "America/Chicago" });
+    return byDay.get(key) ?? { day: key, revenue: 0, orders: 0 };
+  });
+}
 
-const inches = (n: number) => `${+n.toFixed(3)}"`;
+function Stat({ label, value, sub, href }: { label: string; value: string; sub?: string; href?: string }) {
+  const body = (
+    <>
+      <p className="text-sm text-ink/60">{label}</p>
+      <p className="mt-1 text-2xl font-bold text-navy">{value}</p>
+      {sub && <p className="mt-0.5 text-xs text-ink/50">{sub}</p>}
+    </>
+  );
+  return href ? (
+    <Link href={href} className="rounded-2xl border border-line bg-white p-4 transition hover:border-navy/30">{body}</Link>
+  ) : (
+    <div className="rounded-2xl border border-line bg-white p-4">{body}</div>
+  );
+}
 
-export default async function AdminPage() {
-  const user = await getCurrentUser();
-  if (!user) redirect("/signin?next=/admin");
-  if (!isAdmin(user)) notFound();
-
-  const orders = await allOrders();
-  const ids = [...new Set(orders.flatMap((o) => o.items.flatMap((i) => (i.designId ? [i.designId] : []))))];
-  const designs = new Map((await Promise.all(ids.map((id) => findDesign(id)))).flatMap((d) => (d ? [[d.id, d] as const] : [])));
+export default async function AdminDashboard() {
+  await requireStaff();
+  const [stats, recent] = await Promise.all([dashboardStats(), searchOrders({ payment: "placed" })]);
+  const days = last30(stats.daily);
 
   return (
-    <div className="container-x py-12">
-      <h1 className="font-display text-4xl text-navy">Orders</h1>
-      <p className="mt-2 text-ink/60">
-        {orders.length} most recent orders. Print files are full size, with bleed, at the DPI shown. PDFs are CMYK with TrimBox/BleedBox set; contour-cut jobs carry the cut line as a CutContour spot color.
-      </p>
+    <>
+      <PageHeader title="Dashboard">
+        <Link href="/admin/orders" className="btn-outline px-4 py-2">All orders</Link>
+      </PageHeader>
 
-      <ul className="mt-8 space-y-6">
-        {orders.map((o) => (
-          <li key={o.id} className="rounded-2xl border border-line p-5">
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div>
-                <span className="text-lg font-semibold text-navy">{o.number}</span>
-                <span className="ml-3 text-sm text-ink/50">{new Date(o.createdAt).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}</span>
-                <p className="mt-1 text-sm text-ink/70">
-                  {o.customer.name}
-                  {o.customer.company && ` · ${o.customer.company}`} ·{" "}
-                  <a href={`mailto:${o.customer.email}`} className="underline">{o.customer.email}</a>
-                  {o.customer.phone && <> · <a href={`tel:${o.customer.phone}`} className="underline">{o.customer.phone}</a></>}
-                </p>
-                <p className="text-sm text-ink/70">
-                  {o.fulfillment === "pickup" ? "Store pickup" : `Delivery: ${o.address}`}
-                </p>
-              </div>
-              <form action={updateOrderStatus} className="flex items-center gap-2">
-                <input type="hidden" name="id" value={o.id} />
-                <span
-                  className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                    o.paymentStatus === "paid" ? "bg-cyan/15 text-navy" : o.paymentStatus === "unpaid" ? "bg-magenta/15 text-magenta" : "bg-mist text-ink/60"
-                  }`}
-                >
-                  {o.paymentStatus === "paid" ? "Paid" : o.paymentStatus === "unpaid" ? "Awaiting payment" : "Invoiced"}
-                </span>
-                <span className={`rounded-full px-3 py-1 text-xs font-semibold ${statusColor[o.status]}`}>{o.status}</span>
-                <select name="status" defaultValue={o.status} className="field w-auto px-3 py-1.5 text-sm" aria-label="Order status">
-                  {ORDER_STATUSES.map((s) => <option key={s}>{s}</option>)}
-                </select>
-                <button type="submit" className="btn-outline px-3 py-1.5 text-sm">Update</button>
-              </form>
-            </div>
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+        <Stat label="Revenue today" value={formatPrice(stats.revenue.today)} />
+        <Stat label="Last 7 days" value={formatPrice(stats.revenue.week)} />
+        <Stat label="Last 30 days" value={formatPrice(stats.revenue.month)} sub={`${stats.monthOrders} paid orders`} />
+        <Stat label="Open orders" value={String(stats.openOrders)} sub="Paid or invoiced, not completed" href="/admin/orders" />
+        <Stat label="Awaiting payment" value={String(stats.awaitingPayment)} sub="Checkout not finished" href="/admin/orders?payment=unpaid" />
+        <Stat label="Customers" value={String(stats.customers.total)} sub={`${stats.customers.new30} new in 30 days`} href="/admin/customers" />
+      </div>
 
-            {o.notes && <p className="mt-3 rounded-lg bg-yellow/20 px-3 py-2 text-sm text-navy"><b>Customer notes:</b> {o.notes}</p>}
-
-            <ul className="mt-4 divide-y divide-line">
-              {o.items.map((i, n) => {
-                const design = i.designId ? designs.get(i.designId) : undefined;
-                const product = getProduct(i.slug);
-                const config = getDesignConfig(i.slug);
-                const variant = product?.variants.find((v) => v.label === i.variant);
-                const dims = config?.kind === "flat" && variant ? flatDims(i.slug, variant.id) : undefined;
-                const spec = config ? printSpec(config, dims) : undefined;
-                return (
-                  <li key={n} className="flex flex-wrap items-start justify-between gap-4 py-3">
-                    <div className="flex items-start gap-3">
-                      {i.preview && (
-                        // eslint-disable-next-line @next/next/no-img-element -- design preview served by our API
-                        <img src={i.preview} alt="Design preview" className="h-16 w-16 rounded-md bg-mist object-contain" />
-                      )}
-                      <div className="text-sm">
-                        <p className="font-medium">{i.name} × {i.qty}</p>
-                        <p className="text-ink/60">{i.color && `${i.color} · `}{i.variant}</p>
-                        {spec && design && (
-                          <p className="mt-1 text-xs text-ink/50">
-                            {dims && `${inches(dims[0])} × ${inches(dims[1])} trim · `}
-                            {spec.dpi} DPI{spec.bleedIn > 0 && ` · ${inches(spec.bleedIn)} bleed`}
-                            {spec.cut && " · contour cut"}
-                          </p>
-                        )}
-                        {i.designId && !design && <p className="mt-1 text-xs text-magenta">Design record not found.</p>}
-                        {!i.designId && <p className="mt-1 text-xs text-ink/50">No design: customer will send artwork.</p>}
-                      </div>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2 text-sm">
-                      {design?.sides.map((side) => (
-                        <span key={side} className="flex gap-2">
-                          <a href={`/api/designs/${design.id}/${side}-print.png`} download className="btn-primary px-3 py-1.5 text-sm">
-                            Print file{design.sides.length > 1 ? ` (${side})` : ""}
-                          </a>
-                          {/* Gang sheets are too large to convert to PDF on the server: use the PNG. */}
-                          {!(config && isGang(config)) && (
-                            <>
-                              <a href={`/api/designs/${design.id}/${side}-print.pdf`} download className="btn-outline px-3 py-1.5 text-sm">
-                                PDF
-                              </a>
-                              <a href={`/api/designs/${design.id}/${side}-print.pdf?marks=1`} download className="btn-outline px-3 py-1.5 text-sm">
-                                PDF + crop marks
-                              </a>
-                            </>
-                          )}
-                          {spec?.cut && (
-                            <a href={`/api/designs/${design.id}/${side}-cut.svg`} download className="btn-outline px-3 py-1.5 text-sm">
-                              Cut path
-                            </a>
-                          )}
-                        </span>
-                      ))}
-                      <span className="w-20 text-right font-medium">{formatPrice(i.price * i.qty)}</span>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-            <p className="mt-3 border-t border-line pt-3 text-right text-sm text-ink/60">
-              Subtotal {formatPrice(o.subtotal)} · Tax {formatPrice(o.tax)} ·{" "}
-              <span className="font-semibold text-navy">Total {formatPrice(o.subtotal + o.tax)}</span>
-            </p>
-          </li>
+      <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+        {(
+          [
+            ["review", "New orders to check"],
+            ["changes_requested", "Send an updated proof"],
+            ["proof_sent", "Waiting for the customer"],
+            ["approved", "Ready for production"],
+          ] as [Approval, string][]
+        ).map(([a, hint]) => (
+          <Link key={a} href={`/admin/orders?approval=${a}`} className="rounded-2xl border border-line bg-white p-4 transition hover:border-navy/30">
+            <ApprovalBadge approval={a} />
+            <p className="mt-2 text-2xl font-bold text-navy">{stats.byApproval[a] ?? 0}</p>
+            <p className="text-xs text-ink/50">{hint}</p>
+          </Link>
         ))}
-        {orders.length === 0 && <li className="rounded-2xl border border-dashed border-line p-10 text-center text-ink/60">No orders yet.</li>}
-      </ul>
-    </div>
+      </div>
+      {(stats.byApproval.artwork_issue ?? 0) > 0 && (
+        <Link href="/admin/orders?approval=artwork_issue" className="mt-3 block rounded-xl bg-magenta/10 px-4 py-2 text-sm text-magenta hover:underline">
+          {stats.byApproval.artwork_issue} {stats.byApproval.artwork_issue === 1 ? "order is" : "orders are"} waiting for new artwork from the customer →
+        </Link>
+      )}
+
+      <div className="mt-4 flex flex-wrap gap-2">
+        {ORDER_STATUSES.map((s) => (
+          <Link key={s} href={`/admin/orders?status=${encodeURIComponent(s)}`} className="flex items-center gap-2 rounded-full border border-line px-3 py-1.5 text-sm hover:border-navy/30">
+            <StatusBadge status={s} />
+            <span className="font-semibold text-navy">{stats.byStatus[s] ?? 0}</span>
+          </Link>
+        ))}
+      </div>
+
+      <div className="mt-6 grid gap-6 xl:grid-cols-[1fr_20rem]">
+        <Card title="Paid revenue, last 30 days">
+          <RevenueChart days={days} />
+          <details className="mt-3 text-sm">
+            <summary className="cursor-pointer text-ink/60 hover:text-navy">View as table</summary>
+            <table className="mt-2 w-full text-left">
+              <thead className="text-ink/50">
+                <tr><th className="py-1 font-medium">Day</th><th className="py-1 text-right font-medium">Orders</th><th className="py-1 text-right font-medium">Revenue</th></tr>
+              </thead>
+              <tbody className="divide-y divide-line">
+                {days.filter((d) => d.orders > 0).map((d) => (
+                  <tr key={d.day}><td className="py-1">{d.day}</td><td className="py-1 text-right">{d.orders}</td><td className="py-1 text-right">{formatPrice(d.revenue)}</td></tr>
+                ))}
+                {days.every((d) => d.orders === 0) && <tr><td colSpan={3} className="py-2 text-ink/50">No paid orders in the last 30 days.</td></tr>}
+              </tbody>
+            </table>
+          </details>
+        </Card>
+
+        <Card title="Top products, last 30 days">
+          {stats.topProducts.length === 0 ? (
+            <p className="text-sm text-ink/50">No paid orders yet.</p>
+          ) : (
+            <ol className="space-y-3 text-sm">
+              {stats.topProducts.map((p) => (
+                <li key={p.slug} className="flex justify-between gap-3">
+                  <Link href={`/admin/products/${p.slug}`} className="min-w-0 truncate hover:text-navy hover:underline">{p.name}</Link>
+                  <span className="shrink-0 text-ink/60">{p.qty} sold · <b className="text-navy">{formatPrice(p.revenue)}</b></span>
+                </li>
+              ))}
+            </ol>
+          )}
+        </Card>
+      </div>
+
+      <Card title="Recent orders" className="mt-6">
+        <OrderTable orders={recent.orders.slice(0, 8)} />
+      </Card>
+    </>
   );
 }

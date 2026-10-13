@@ -1,8 +1,9 @@
 "use client";
 
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
-import { getProduct } from "@/lib/catalog";
+import type { Catalog } from "@/lib/catalog";
 import { requiresDesign } from "@/lib/design-config";
+import { useCatalog } from "./store";
 
 export type CartLine = { slug: string; variant: string; color?: string; qty: number; designId?: string; preview?: string };
 
@@ -20,27 +21,30 @@ type CartContextValue = {
 const CartContext = createContext<CartContextValue | null>(null);
 const KEY = "maxx-cart";
 
-export function linePrice(line: CartLine) {
-  const product = getProduct(line.slug);
+export function linePrice(catalog: Catalog, line: CartLine) {
+  const product = catalog.getProduct(line.slug);
   return product?.variants.find((v) => v.id === line.variant)?.price ?? 0;
 }
 
-/** Products without a quantity picker are always bought once per option. */
-const capQty = (line: CartLine, qty: number) => (getProduct(line.slug)?.noQty ? 1 : qty);
+/**
+ * A line can be bought if its product and option exist, aren't hidden or price on request,
+ * and it has a design when the product needs one.
+ */
+const isValid = (catalog: Catalog, l: CartLine) =>
+  !!catalog.getProduct(l.slug)?.variants.some((v) => v.id === l.variant && v.price !== null) && (!requiresDesign(l.slug) || !!l.designId);
 
 export function CartProvider({ children }: { children: React.ReactNode }) {
-  const [lines, setLines] = useState<CartLine[]>([]);
+  const catalog = useCatalog();
+  const [saved, setLines] = useState<CartLine[]>([]);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
     try {
-      const saved = JSON.parse(localStorage.getItem(KEY) ?? "[]");
-      // Drop lines whose product or option no longer exists, or is now price on request,
-      // and lines for products that need a design but have none.
-      const valid = (l: CartLine) =>
-        getProduct(l.slug)?.variants.some((v) => v.id === l.variant && v.price !== null) && (!requiresDesign(l.slug) || !!l.designId);
+      const stored = JSON.parse(localStorage.getItem(KEY) ?? "[]");
+      // Lines that can't be bought are left out of `lines` below rather than deleted here,
+      // so they come back if staff show the product again.
       // eslint-disable-next-line react-hooks/set-state-in-effect -- hydrate from storage after mount
-      if (Array.isArray(saved)) setLines(saved.filter(valid));
+      if (Array.isArray(stored)) setLines(stored);
     } catch {}
     setReady(true);
   }, []);
@@ -48,11 +52,15 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!ready) return;
     try {
-      localStorage.setItem(KEY, JSON.stringify(lines));
+      localStorage.setItem(KEY, JSON.stringify(saved));
     } catch {}
-  }, [lines, ready]);
+  }, [saved, ready]);
 
   const value = useMemo<CartContextValue>(() => {
+    // Staff may hide a product or change an option while it sits in someone's cart.
+    const lines = saved.filter((l) => isValid(catalog, l));
+    /** Products without a quantity picker are always bought once per option. */
+    const capQty = (line: CartLine, qty: number) => (catalog.getProduct(line.slug)?.noQty ? 1 : qty);
     const same = (a: CartLine, b: CartLine) =>
       a.slug === b.slug &&
       a.variant === b.variant &&
@@ -62,7 +70,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       lines,
       ready,
       count: lines.reduce((n, l) => n + l.qty, 0),
-      subtotal: lines.reduce((n, l) => n + linePrice(l) * l.qty, 0),
+      subtotal: lines.reduce((n, l) => n + linePrice(catalog, l) * l.qty, 0),
       add: (line) =>
         setLines((prev) =>
           prev.some((l) => same(l, line))
@@ -74,7 +82,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       remove: (line) => setLines((prev) => prev.filter((l) => !same(l, line))),
       clear: () => setLines((prev) => (prev.length ? [] : prev)),
     };
-  }, [lines, ready]);
+  }, [saved, ready, catalog]);
 
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>;
 }

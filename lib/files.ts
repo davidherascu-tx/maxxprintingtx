@@ -36,6 +36,15 @@ export const UPLOAD_TYPES: Record<string, string> = {
 };
 export { MAX_UPLOAD_BYTES, MAX_REQUEST_BYTES } from "./limits";
 
+/** An image's real type from its first bytes (so a declared type can't be spoofed), or null. */
+export function sniffImage(b: Buffer): string | null {
+  if (b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return "image/png";
+  if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return "image/jpeg";
+  if (b.subarray(0, 4).toString() === "RIFF" && b.subarray(8, 12).toString() === "WEBP") return "image/webp";
+  if (b.subarray(0, 4).toString() === "GIF8") return "image/gif";
+  return null;
+}
+
 const ID = /^[0-9a-f-]{36}$/;
 export const isId = (id: string) => ID.test(id);
 
@@ -69,6 +78,17 @@ export async function deleteUpload(id: string) {
   if (!isId(id)) return;
   const res = await s3(`/uploads/${id}`, { method: "DELETE" });
   if (!res.ok && res.status !== 404) throw new Error(`Storage delete failed (${res.status})`);
+}
+
+/** Proof images staff send to a customer, kept per order. */
+export async function saveProofImage(orderId: string, imageId: string, type: string, bytes: Buffer) {
+  if (!isId(orderId) || !isId(imageId)) throw new Error("Invalid proof id");
+  await write(`proofs/${orderId}/${imageId}`, bytes, type);
+}
+
+export async function readProofImage(orderId: string, imageId: string) {
+  if (!isId(orderId) || !isId(imageId)) return null;
+  return read(`proofs/${orderId}/${imageId}`);
 }
 
 /** Design files: `design.json`, `<side>-preview.png`, `<side>-print.png`, `<side>-cut.svg`. */

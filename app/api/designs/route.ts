@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { getProduct } from "@/lib/catalog";
+import { getCatalog } from "@/lib/store";
 import { getDesignConfig } from "@/lib/design-config";
 import { createDesign } from "@/lib/db";
 import { saveDesignFile } from "@/lib/files";
@@ -34,7 +34,7 @@ export async function POST(request: Request) {
     return bad("Invalid design.");
   }
 
-  const product = getProduct(meta.slug);
+  const product = (await getCatalog()).getProduct(meta.slug);
   const config = getDesignConfig(meta.slug);
   if (!product || !config) return bad("This product can't be customized.");
   if (!product.variants.some((v) => v.id === meta.variant)) return bad("Unknown option.");

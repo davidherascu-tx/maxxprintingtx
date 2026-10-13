@@ -1,23 +1,22 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { formatPrice, fromPrice, getCategory, getProduct, products, productsIn } from "@/lib/catalog";
+import { fromPrice, fromRegularPrice } from "@/lib/catalog";
+import { Price, SaleBadge } from "@/components/price";
+import { getCatalog } from "@/lib/store";
 import { ProductGrid } from "@/components/product-card";
 import { ColorImage, ColorProvider } from "@/components/product-color";
 import { AddToCart } from "@/components/add-to-cart";
 import { isDesignable, requiresDesign } from "@/lib/design-config";
 
-export function generateStaticParams() {
-  return products.map((p) => ({ slug: p.slug }));
-}
-
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
-  const product = getProduct((await params).slug);
+  const product = (await getCatalog()).getProduct((await params).slug);
   return product ? { title: product.name, description: product.description } : {};
 }
 
 export default async function ProductPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
+  const { getCategory, getProduct, productsIn } = await getCatalog();
   const product = getProduct(slug);
   if (!product) notFound();
   const category = getCategory(product.category)!;
@@ -42,6 +41,7 @@ export default async function ProductPage({ params }: { params: Promise<{ slug: 
         <div>
           <span className="text-sm font-medium uppercase tracking-wider text-magenta">{category.name}</span>
           <h1 className="mt-2 font-display text-3xl text-navy sm:text-4xl">{product.name}</h1>
+          {product.onSale && <SaleBadge endsAt={product.saleEndsAt} className="mt-3" />}
           <p className="mt-4 text-ink/70">{product.description}</p>
           {product.more && (
             <>
@@ -54,7 +54,7 @@ export default async function ProductPage({ params }: { params: Promise<{ slug: 
             // No plain "Add to cart": the sheet is the design, so it's added from the studio once it has artwork.
             <div className="mt-8">
               <p className="text-3xl font-bold text-navy">
-                {formatPrice(fromPrice(product) ?? 0)}
+                <Price price={fromPrice(product) ?? 0} compareAt={product.onSale ? (fromRegularPrice(product) ?? undefined) : undefined} className="" />
                 <span className="ml-2 text-sm font-normal text-ink/50">for a 22&quot; x 12&quot; sheet · longer sheets cost more</span>
               </p>
               <Link href={`/design/${product.slug}`} className="btn-primary mt-6 w-full py-3.5">

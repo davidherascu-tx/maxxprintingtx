@@ -1,11 +1,13 @@
 import Image from "next/image";
 import Link from "next/link";
-import { categories } from "@/lib/catalog";
-import { mapsUrl, site } from "@/lib/site";
+import { baseCategories as categories } from "@/lib/catalog";
+import { mapsUrl } from "@/lib/site";
+import { getSite } from "@/lib/store";
 
-export function Footer() {
+export async function Footer() {
+  const site = await getSite();
   return (
-    <footer className="mt-24 bg-navy-900 text-white/80">
+    <footer className="print:hidden mt-24 bg-navy-900 text-white/80">
       <div className="cmyk-bar h-1.5" />
       <div className="container-x grid gap-10 py-14 sm:grid-cols-2 lg:grid-cols-4">
         <div>
@@ -37,7 +39,7 @@ export function Footer() {
         <div>
           <h3 className="mb-4 text-sm font-semibold uppercase tracking-wider text-white">Contact Us</h3>
           <address className="space-y-2 text-sm not-italic">
-            <a href={mapsUrl} target="_blank" rel="noreferrer" className="block hover:text-white">
+            <a href={mapsUrl(site)} target="_blank" rel="noreferrer" className="block hover:text-white">
               {site.address.line1}<br />
               {site.address.line2}<br />
               {site.address.city}, {site.address.state} {site.address.zip}

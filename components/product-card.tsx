@@ -1,6 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
-import { formatPrice, fromPrice, getCategory, type Product } from "@/lib/catalog";
+import { baseCategories, type Product } from "@/lib/catalog";
+import { FromPrice, SaleBadge } from "./price";
 
 export function ProductImage({
   product,
@@ -47,18 +48,15 @@ export function ProductCard({ product }: { product: Product }) {
     >
       <div className="relative aspect-square bg-mist">
         <ProductImage product={product} sizes="(min-width: 1024px) 25vw, (min-width: 640px) 33vw, 50vw" />
+        {product.variants.some((v) => v.compareAt !== undefined) && <SaleBadge endsAt={product.saleEndsAt} className="absolute left-3 top-3" />}
       </div>
       <div className="flex flex-1 flex-col gap-1 p-4">
         <span className="text-xs font-medium uppercase tracking-wider text-magenta">
-          {getCategory(product.category)?.name}
+          {baseCategories.find((c) => c.slug === product.category)?.name}
         </span>
         <span className="font-semibold leading-snug text-ink">{product.name}</span>
         <span className="mt-auto pt-2 text-sm text-ink/60">
-          {fromPrice(product) === null ? (
-                  "Price on request"
-                ) : (
-                  <>From <span className="font-semibold text-navy">{formatPrice(fromPrice(product)!)}</span></>
-                )}
+          <FromPrice product={product} />
         </span>
       </div>
     </Link>

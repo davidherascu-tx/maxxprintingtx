@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import { signOutAll } from "@/lib/actions";
 import { useCart } from "./cart";
 
 export function CartButton() {
@@ -29,9 +30,13 @@ export function CartButton() {
 export function MobileMenu({
   categories,
   signedIn,
+  staff,
 }: {
   categories: { slug: string; name: string }[];
+  /** A customer is signed in. */
   signedIn: boolean;
+  /** A staff member is signed in. */
+  staff: boolean;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -62,9 +67,17 @@ export function MobileMenu({
               </Link>
             ))}
             <Link href="/contact" className="rounded-lg px-3 py-2 hover:bg-mist">Contact</Link>
-            <Link href={signedIn ? "/account" : "/signin"} className="rounded-lg px-3 py-2 font-medium text-navy hover:bg-mist">
-              {signedIn ? "My account" : "Sign in / Create account"}
-            </Link>
+            {staff && <Link href="/admin" className="rounded-lg px-3 py-2 font-medium text-navy hover:bg-mist">Admin</Link>}
+            {signedIn && <Link href="/account" className="rounded-lg px-3 py-2 font-medium text-navy hover:bg-mist">My account</Link>}
+            {signedIn || staff ? (
+              <form action={signOutAll}>
+                <button type="submit" className="w-full rounded-lg px-3 py-2 text-left font-medium text-ink/70 hover:bg-mist hover:text-magenta">
+                  Sign out
+                </button>
+              </form>
+            ) : (
+              <Link href="/signin" className="rounded-lg px-3 py-2 font-medium text-navy hover:bg-mist">Sign in / Create account</Link>
+            )}
           </div>
         </nav>
       )}

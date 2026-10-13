@@ -5,11 +5,13 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import {
   claimDesigns, createOrder, createUser, deleteDesign, deleteUnpaidOrder, findDesign, findOrder, findUserByEmail,
-  ORDER_STATUSES, setOrderStatus, unpaidOrdersForUser, updateUser,
+  moveApproval, unpaidOrdersForUser, updateUser,
 } from "./db";
 import { deleteDesignFiles } from "./files";
-import { createSession, deleteSession, getCurrentUser, hashPassword, isAdmin, verifyPassword } from "./session";
-import { colorOf, getProduct } from "./catalog";
+import { deleteStaffSession } from "./staff-session";
+import { createSession, deleteSession, getCurrentUser, hashPassword, verifyPassword } from "./session";
+import { colorOf } from "./catalog";
+import { getCatalog, getSettings } from "./store";
 import { requiresDesign } from "./design-config";
 import { expireSession, paymentsConfigured, startCheckout } from "./payments";
 import { calcTax } from "./tax";
@@ -68,6 +70,12 @@ export async function signOut() {
   redirect("/");
 }
 
+/** The header's "Sign out": ends the customer and the staff session, whichever exist. */
+export async function signOutAll() {
+  await Promise.all([deleteSession(), deleteStaffSession()]);
+  redirect("/");
+}
+
 export async function updateProfile(_: FormState, form: FormData): Promise<FormState> {
   const user = await getCurrentUser();
   if (!user) redirect("/signin");
@@ -105,7 +113,8 @@ export async function placeOrder(_: FormState, form: FormData): Promise<FormStat
     return { error: "Your cart could not be read. Please try again." };
   }
 
-  // Re-price every line from the catalog; never trust client prices.
+  // Re-price every line from the catalog (with admin edits); never trust client prices.
+  const [{ getProduct }, settings] = await Promise.all([getCatalog(), getSettings()]);
   const items = (
     await Promise.all(
       raw.map(async (line) => {
@@ -141,6 +150,9 @@ export async function placeOrder(_: FormState, form: FormData): Promise<FormStat
   if (designIds.length) await claimDesigns(designIds, user.id);
 
   const fulfillment = str(form, "fulfillment") === "delivery" ? "delivery" : "pickup";
+  if (!settings[fulfillment].enabled) {
+    return { error: fulfillment === "delivery" ? "Delivery isn't available right now. Please choose pickup." : "Store pickup isn't available right now. Please choose delivery." };
+  }
   const address = str(form, "address");
   if (fulfillment === "delivery" && address.length < 8) {
     return { error: "Please enter a delivery address." };
@@ -156,7 +168,7 @@ export async function placeOrder(_: FormState, form: FormData): Promise<FormStat
     userId: user.id,
     items,
     subtotal,
-    tax: calcTax(subtotal),
+    tax: calcTax(subtotal, settings.taxRate),
     notes: str(form, "notes").slice(0, 2000),
     fulfillment,
     address: fulfillment === "delivery" ? address : undefined,
@@ -212,12 +224,28 @@ export async function payOrder(form: FormData) {
   redirect(url);
 }
 
-export async function updateOrderStatus(form: FormData) {
+/** The customer approves the proof staff sent. */
+export async function approveProof(form: FormData) {
   const user = await getCurrentUser();
-  if (!isAdmin(user)) redirect("/");
-  const status = ORDER_STATUSES.find((s) => s === str(form, "status"));
-  if (!status) return;
-  await setOrderStatus(str(form, "id"), status);
-  revalidatePath("/admin");
+  if (!user) redirect("/signin");
+  const order = await findOrder(str(form, "id"));
+  if (!order || order.userId !== user.id) return;
+  await moveApproval(order.id, ["proof_sent"], "approved", { actor: "customer", actorName: user.name, kind: "approved", note: "" });
   revalidatePath("/account");
+  revalidatePath("/admin", "layout");
+}
+
+/** The customer asks for changes to the proof. */
+export async function requestProofChanges(_: FormState, form: FormData): Promise<FormState> {
+  const user = await getCurrentUser();
+  if (!user) redirect("/signin");
+  const order = await findOrder(str(form, "id"));
+  if (!order || order.userId !== user.id) return { error: "Order not found." };
+  const note = str(form, "note").slice(0, 3000);
+  if (note.length < 3) return { error: "Please tell us what to change." };
+  const moved = await moveApproval(order.id, ["proof_sent"], "changes_requested", { actor: "customer", actorName: user.name, kind: "changes_requested", note });
+  if (!moved) return { error: "This proof can't be changed anymore. Please call us." };
+  revalidatePath("/account");
+  revalidatePath("/admin", "layout");
+  return { ok: "Thanks! We'll update your proof and send a new one." };
 }

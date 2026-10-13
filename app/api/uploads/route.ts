@@ -1,15 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { UPLOAD_TYPES, saveUpload } from "@/lib/files";
+import { UPLOAD_TYPES, saveUpload, sniffImage as sniff } from "@/lib/files";
 import { MAX_REQUEST_BYTES, MAX_UPLOAD_BYTES, MAX_UPLOAD_MB } from "@/lib/limits";
-
-// Check the file's magic bytes so the declared type can't be spoofed.
-function sniff(b: Buffer): string | null {
-  if (b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return "image/png";
-  if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return "image/jpeg";
-  if (b.subarray(0, 4).toString() === "RIFF" && b.subarray(8, 12).toString() === "WEBP") return "image/webp";
-  if (b.subarray(0, 4).toString() === "GIF8") return "image/gif";
-  return null;
-}
 
 export async function POST(request: Request) {
   if (Number(request.headers.get("content-length")) > MAX_REQUEST_BYTES) {

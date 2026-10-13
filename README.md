@@ -31,7 +31,7 @@ Open http://localhost:3000.
 - Database: Neon Postgres. Run `db/schema.sql` once in the Neon SQL editor.
 - Files: private Neon Object Storage bucket named `files` (S3-compatible). Set `NEON_S3_ENDPOINT`, `NEON_S3_REGION`, `NEON_S3_ACCESS_KEY_ID`, `NEON_S3_SECRET_ACCESS_KEY` (create the bucket and a storage credential with the Neon CLI: `neon buckets create files`, `neon credentials create --scope storage:read --scope storage:write`).
 - Hosting: Cloudflare Workers via OpenNext (`wrangler.jsonc`, `open-next.config.ts`).
-- Secrets (set in Cloudflare → Workers → maxxprintingtx → Settings → Variables and Secrets): `DATABASE_URL`, the four `NEON_S3_*` values, `SESSION_SECRET`, `ADMIN_EMAILS`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`.
+- Secrets (set in Cloudflare → Workers → maxxprintingtx → Settings → Variables and Secrets): `DATABASE_URL`, the four `NEON_S3_*` values, `SESSION_SECRET`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`.
 - `npm run preview` runs the Cloudflare build locally; `npm run deploy` ships it.
 
 ## Card payments (Stripe)
@@ -62,7 +62,8 @@ An order is saved as "Awaiting payment" and only becomes a real order when Strip
 | `lib/design-fonts.ts` | Fonts offered in the studio |
 | `components/studio/` | The studio UI (`studio.tsx`) and Fabric.js canvas engine (`engine.ts`) |
 | `app/api/uploads`, `app/api/designs` | Image upload and design save/serve endpoints. Print and cut files are only served to the owner and to staff |
-| `app/admin` | Staff order list with status updates and print/cut file downloads |
+| `app/admin` | Admin backend: dashboard, orders (status, payments, notes, packing slips, print files), products, customers, staff, settings |
+| `lib/admin-actions.ts`, `lib/store.ts` | Admin server actions; the catalog and settings with admin edits applied |
 | `lib/files.ts` | Uploads and design files in a private Neon Object Storage bucket (`uploads/`, `designs/<id>/`) |
 | `public/products` | Product images (from the InkSoft store) |
 
@@ -71,6 +72,6 @@ An order is saved as "Awaiting payment" and only becomes a real order when Strip
 - Set `DATABASE_URL` and the `NEON_S3_*` values (listed above) and create the `files` bucket.
 - `SESSION_SECRET` must be set in production (Settings → Environment Variables).
 - Prices in `lib/catalog.ts` are placeholders. Update them to the shop's real pricing.
-- Set `ADMIN_EMAILS` (comma-separated) to the sign-in emails of staff. Those accounts get an **Orders** link in the header and `/admin`, where each order lists its print files (and cut paths) for download. Create the staff account first via Sign up.
+- **Admin** (`/admin`, sign in at `/admin/login`): staff have their own logins, separate from customer accounts. Create the first one with `npm run admin:create` (asks for name, email and a hidden password; run it again to reset a forgotten password), then add more in Admin → Staff. The admin has a sales dashboard; orders with search, filters (status, payment, approval, design source), manual payments (cash/invoice), internal notes, packing slips and print/cut file downloads; artwork approval (staff review, proof with message and image, customer approves or requests changes in their account, history; an order only goes to production once approved), and each item marked as Design Studio, DTF gang sheet or artwork to follow; product edits (name, description, prices, sales with an end date, hide/show products and options, featured) saved as overrides on top of `lib/catalog.ts`; customers (details, orders, designs, set a new password); and store settings (business info, tax rate, pickup/delivery). New products are still added in code. The admin tables are at the end of `db/schema.sql`.
 - Upload limits live in `lib/limits.ts`: images up to 20 MB, and a saved design (all preview and print files together) up to 20 MB, kept below the Cloudflare Workers request and memory limits. If the print files would be bigger, the studio lowers their DPI just enough to fit; the DPI stored in each PNG always matches its real size. For bigger files, ask customers to send artwork directly or upload straight to the bucket from the browser (presigned URLs).
 - **Print PDFs** (`/admin` → PDF, PDF + crop marks; or `/api/designs/<id>/<side>-print.pdf[?marks=1][&rgb=1]`) are built on demand from the saved print PNG: page size from the PNG's DPI, TrimBox and BleedBox set, text already flattened to pixels (no fonts to embed), CMYK artwork by default, optional crop marks, and the cut line as a `CutContour` spot color on contour-cut products. Limits to know: the CMYK conversion is a plain formula, not ICC color-managed; there is no PDF/X OutputIntent, so it will not pass a strict PDF/X-1a or X-4 check; and the artwork resolution is whatever the saved PNG has (see the 4.5 MB note above). For certified PDF/X or managed CMYK, run the PDF through Acrobat Preflight or your RIP with your shop's profile.

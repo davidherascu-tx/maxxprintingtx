@@ -1,10 +1,10 @@
 import Image from "next/image";
 import Link from "next/link";
-import { categories, products, productsIn } from "@/lib/catalog";
 import { ProductGrid } from "@/components/product-card";
-import { site } from "@/lib/site";
+import { getCatalog, getSite } from "@/lib/store";
 
-export default function Home() {
+export default async function Home() {
+  const [{ categories, products, productsIn }, site] = await Promise.all([getCatalog(), getSite()]);
   const featured = products.filter((p) => p.featured);
 
   return (

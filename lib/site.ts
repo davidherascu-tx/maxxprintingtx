@@ -1,4 +1,5 @@
-export const site = {
+/** Business details as defined in code. Staff can change them in Admin → Settings (see `getSettings`). */
+export const defaultSite = {
   name: "Maxx Marketing Agency",
   legalName: "Maxx Marketing Agency LLC",
   tagline: "Printing • Marketing • Custom Products",
@@ -15,6 +16,9 @@ export const site = {
   url: "https://maxxprintingtx.com",
 };
 
-export const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-  `${site.address.line1} ${site.address.line2}, ${site.address.city}, ${site.address.state} ${site.address.zip}`,
-)}`;
+export type Site = typeof defaultSite;
+
+export const fullAddress = (site: Site) =>
+  `${site.address.line1}${site.address.line2 ? ` ${site.address.line2}` : ""}, ${site.address.city}, ${site.address.state} ${site.address.zip}`;
+
+export const mapsUrl = (site: Site) => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(fullAddress(site))}`;

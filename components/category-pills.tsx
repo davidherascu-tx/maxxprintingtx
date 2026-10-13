@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { categories } from "@/lib/catalog";
+import { baseCategories as categories } from "@/lib/catalog";
 
 export function CategoryPills({ active }: { active?: string }) {
   const pill = (on: boolean) =>

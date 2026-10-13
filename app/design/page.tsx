@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { categories, formatPrice, fromPrice, products } from "@/lib/catalog";
+
+import { getCatalog } from "@/lib/store";
 import { isDesignable } from "@/lib/design-config";
 import { ProductImage } from "@/components/product-card";
+import { FromPrice, SaleBadge } from "@/components/price";
 
 export const metadata: Metadata = {
   title: "Design Studio",
@@ -10,7 +12,7 @@ export const metadata: Metadata = {
 };
 
 export default async function DesignSelectPage({ searchParams }: { searchParams: Promise<{ category?: string }> }) {
-  const { category } = await searchParams;
+  const [{ category }, { categories, products }] = await Promise.all([searchParams, getCatalog()]);
   const designable = products.filter(isDesignable);
   const shown = category ? designable.filter((p) => p.category === category) : designable;
 
@@ -48,6 +50,7 @@ export default async function DesignSelectPage({ searchParams }: { searchParams:
           >
             <div className="relative aspect-square bg-mist">
               <ProductImage product={p} sizes="(min-width: 1024px) 25vw, (min-width: 640px) 33vw, 50vw" />
+              {p.onSale && <SaleBadge endsAt={p.saleEndsAt} className="absolute left-3 top-3" />}
               <span className="absolute bottom-3 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-navy px-4 py-1.5 text-xs font-semibold text-white opacity-0 shadow-lg transition group-hover:opacity-100">
                 Start designing
               </span>
@@ -55,11 +58,7 @@ export default async function DesignSelectPage({ searchParams }: { searchParams:
             <div className="flex flex-1 flex-col gap-1 p-4">
               <span className="font-semibold leading-snug">{p.name}</span>
               <span className="mt-auto pt-1 text-sm text-ink/60">
-                {fromPrice(p) === null ? (
-                  "Price on request"
-                ) : (
-                  <>From <span className="font-semibold text-navy">{formatPrice(fromPrice(p)!)}</span></>
-                )}
+                <FromPrice product={p} />
               </span>
             </div>
           </Link>

@@ -1,4 +1,4 @@
-import { GANG_SHEET_WIDTH_IN, getProduct, type Product } from "./catalog";
+import { GANG_SHEET_WIDTH_IN, baseProduct, type Product } from "./catalog";
 
 /** Print area as fractions of the mockup image (0–1). */
 export type Area = { x: number; y: number; w: number; h: number };
@@ -89,7 +89,7 @@ const configs: Record<string, DesignConfig> = {
     sides: front,
     // "22x48" -> 22" x 48"
     dims: Object.fromEntries(
-      (getProduct("dtf-gang-sheet")?.variants ?? []).map((v) => [v.id, [GANG_SHEET_WIDTH_IN, Number(v.id.split("x")[1])] as [number, number]]),
+      (baseProduct("dtf-gang-sheet")?.variants ?? []).map((v) => [v.id, [GANG_SHEET_WIDTH_IN, Number(v.id.split("x")[1])] as [number, number]]),
     ),
     size: [GANG_SHEET_WIDTH_IN, 12],
     transparent: true,
@@ -103,7 +103,7 @@ const configs: Record<string, DesignConfig> = {
     sides: front,
     // "3x3-100" -> 3" x 3"
     dims: Object.fromEntries(
-      (getProduct("die-cut-stickers")?.variants ?? []).map((v) => {
+      (baseProduct("die-cut-stickers")?.variants ?? []).map((v) => {
         const n = Number(v.id.split("x")[0]);
         return [v.id, [n, n] as [number, number]];
       }),
@@ -184,6 +184,14 @@ export const requiresDesign = (slug: string) => {
   return !!config && isGang(config);
 };
 
+/** Products whose design is made in the DTF gang sheet builder. */
+export const gangSlugs = Object.keys(configs).filter((slug) => isGang(configs[slug]));
+
+/** Where an order item's artwork came from. */
+export type DesignSource = "dtf" | "studio" | "none";
+export const designSource = (item: { slug: string; designId?: string }): DesignSource =>
+  !item.designId ? "none" : gangSlugs.includes(item.slug) ? "dtf" : "studio";
+
 export function getDesignConfig(slug: string): DesignConfig | undefined {
   return configs[slug];
 }
@@ -200,7 +208,4 @@ export function sideIds(slug: string) {
   return getDesignConfig(slug)?.sides.map((s) => s.id) ?? [];
 }
 
-export function designableProduct(slug: string) {
-  const product = getProduct(slug);
-  return product && isDesignable(product) ? product : undefined;
-}
+
