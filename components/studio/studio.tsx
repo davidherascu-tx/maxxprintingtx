@@ -5,8 +5,9 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { formatPrice, fromPrice, type Product } from "@/lib/catalog";
 import { VariantPicker } from "@/components/variant-picker";
-import type { DesignConfig } from "@/lib/design-config";
+import { isGang, type DesignConfig } from "@/lib/design-config";
 import type { DesignFont } from "@/lib/design-fonts";
+import { MAX_DESIGN_BYTES, MAX_UPLOAD_BYTES, MAX_UPLOAD_MB } from "@/lib/limits";
 import { useCart } from "../cart";
 import { StudioEngine, type Selection, type SideState } from "./engine";
 
@@ -16,9 +17,6 @@ const COLORS = [
   "#000000", "#ffffff", "#02245b", "#1d4ed8", "#00aeef", "#0f766e", "#16a34a",
   "#facc15", "#ffd200", "#f97316", "#dc2626", "#ec008c", "#7c3aed", "#6b7280", "#b8860b",
 ];
-const MAX_UPLOAD = 4 * 1024 * 1024;
-// A saved design goes up in one request, which must stay under 4.5 MB (hosting limit).
-const MAX_DESIGN_BYTES = 3.8 * 1000 * 1000;
 
 export type StudioProps = {
   product: Pick<Product, "slug" | "name" | "variants" | "variantLabel" | "optionLabel" | "noQty">;
@@ -51,6 +49,11 @@ export function Studio({ product, config, fonts, initial, initialVariant }: Stud
   const [newText, setNewText] = useState("Your text here");
   const [checkout, setCheckout] = useState(false);
   const [issues, setIssues] = useState<{ list: string[]; lines: { variant: string; qty: number }[] } | null>(null);
+  // Gang sheets: images uploaded this visit (so they can be added again), sheet usage and copies to make.
+  const gang = isGang(config);
+  const [library, setLibrary] = useState<{ url: string; name: string }[]>([]);
+  const [used, setUsed] = useState(0);
+  const [copies, setCopies] = useState(10);
 
   const dims = useCallback(
     (v: string): [number, number] => (config.kind === "flat" ? (config.dims[v] ?? config.size) : [1, 1]),
@@ -63,13 +66,15 @@ export function Studio({ product, config, fonts, initial, initialVariant }: Stud
     setSel(e.selection());
     setHist({ undo: e.canUndo, redo: e.canRedo });
     setCounts((prev) => ({ ...prev, [side]: e.userObjects().length }));
-  }, [side]);
+    if (gang) setUsed(e.usedLengthIn());
+  }, [side, gang]);
 
   const fit = useCallback(() => {
     const box = boxEl.current;
     if (!box || !engineRef.current) return;
-    engineRef.current.fit(box.clientWidth, Math.max(320, window.innerHeight - 260));
-  }, []);
+    // Gang sheets fill the width (minus padding) and scroll; everything else fits the window.
+    engineRef.current.fit(gang ? box.clientWidth - 16 : box.clientWidth, Math.max(320, window.innerHeight - 260));
+  }, [gang]);
 
   // Create the engine once.
   useEffect(() => {
@@ -155,36 +160,65 @@ export function Studio({ product, config, fonts, initial, initialVariant }: Stud
     const eng = engineRef.current;
     setVariant(v);
     if (!eng || config.kind !== "flat" || v === variant) return;
-    // Re-fit every side's artwork to the new size.
+    // Re-fit every side's artwork to the new size. A gang sheet keeps its scale: only the length changes.
     sidesRef.current[side] = eng.serialize();
     const from = { ...eng.area };
     await eng.setupSide(side, dims(v), eng.background);
     const to = { ...eng.area };
-    for (const id of Object.keys(sidesRef.current)) {
-      sidesRef.current[id] = StudioEngine.remap(sidesRef.current[id], from, to);
+    if (!gang) {
+      for (const id of Object.keys(sidesRef.current)) {
+        sidesRef.current[id] = StudioEngine.remap(sidesRef.current[id], from, to);
+      }
     }
     await eng.restore(sidesRef.current[side]);
     eng.commit();
+    eng.onChange();
+    setError(null);
     fit();
   }
 
-  async function upload(file: File) {
+  async function upload(files: File[]) {
     setError(null);
-    if (!/^image\/(png|jpeg|webp|gif)$/.test(file.type)) return setError("Please choose a PNG, JPG, WEBP or GIF image.");
-    if (file.size > MAX_UPLOAD) return setError("Images must be 4 MB or smaller.");
-    setBusy("Uploading image…");
-    try {
-      const body = new FormData();
-      body.append("file", file);
-      const res = await fetch("/api/uploads", { method: "POST", body });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error ?? "Upload failed.");
-      await engineRef.current?.addImage(data.url);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Upload failed.");
-    } finally {
-      setBusy(null);
+    const list = gang ? files : files.slice(0, 1);
+    for (const [n, file] of list.entries()) {
+      const label = list.length > 1 ? ` (${n + 1} of ${list.length})` : "";
+      if (!/^image\/(png|jpeg|webp|gif)$/.test(file.type)) return setError(`${file.name}: please choose a PNG, JPG, WEBP or GIF image.`);
+      if (file.size > MAX_UPLOAD_BYTES) return setError(`${file.name}: images must be ${MAX_UPLOAD_MB} MB or smaller.`);
+      setBusy(`Uploading image${label}…`);
+      try {
+        const body = new FormData();
+        body.append("file", file);
+        const res = await fetch("/api/uploads", { method: "POST", body });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error ?? "Upload failed.");
+        if (gang) setLibrary((l) => [{ url: data.url, name: file.name }, ...l]);
+        await engineRef.current?.addImage(data.url);
+      } catch (err) {
+        setBusy(null);
+        return setError(err instanceof Error ? err.message : "Upload failed.");
+      }
     }
+    setBusy(null);
+  }
+
+  async function deleteImage(img: { url: string; name: string }) {
+    const placed = engineRef.current?.userObjects().filter((o) => (o as { getSrc?: () => string }).getSrc?.().endsWith(img.url)).length ?? 0;
+    if (placed > 0 && !window.confirm(`"${img.name}" is on your sheet ${placed} time${placed === 1 ? "" : "s"}. Delete it and remove ${placed === 1 ? "it" : "them"} from the sheet?`)) return;
+    setError(null);
+    try {
+      const res = await fetch(img.url, { method: "DELETE" });
+      if (!res.ok) throw new Error("We couldn't delete that image. Please try again.");
+      engineRef.current?.removeImage(img.url);
+      setLibrary((l) => l.filter((x) => x.url !== img.url));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "We couldn't delete that image.");
+    }
+  }
+
+  async function addCopies(n: number) {
+    const made = (await engineRef.current?.copies(n)) ?? 0;
+    if (made < n) setError(made === 0 ? "No room left on the sheet. Choose a longer sheet size." : `Only ${made} of ${n} copies fit. Choose a longer sheet size for more.`);
+    else setError(null);
   }
 
   async function saveAndAdd(lines: { variant: string; qty: number }[], ignoreIssues = false) {
@@ -324,30 +358,66 @@ export function Studio({ product, config, fonts, initial, initialVariant }: Stud
                 onDragOver={(ev) => ev.preventDefault()}
                 onDrop={(ev) => {
                   ev.preventDefault();
-                  const file = ev.dataTransfer.files[0];
-                  if (file) upload(file);
+                  const files = [...ev.dataTransfer.files];
+                  if (files.length) upload(files);
                 }}
               >
                 <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="text-navy" aria-hidden>
                   <path d="M12 16V4m0 0L7 9m5-5 5 5M4 20h16" />
                 </svg>
-                <span className="text-sm font-semibold text-navy">Upload an image</span>
-                <span className="text-xs text-ink/50">PNG, JPG, WEBP or GIF up to 4 MB</span>
+                <span className="text-sm font-semibold text-navy">{gang ? "Upload images" : "Upload an image"}</span>
+                <span className="text-xs text-ink/50">PNG, JPG, WEBP or GIF up to {MAX_UPLOAD_MB} MB</span>
                 <input
                   type="file"
                   accept="image/png,image/jpeg,image/webp,image/gif"
                   className="sr-only"
+                  multiple={gang}
                   disabled={!ready || !!busy}
                   onChange={(ev) => {
-                    const file = ev.target.files?.[0];
+                    const files = [...(ev.target.files ?? [])];
                     ev.target.value = "";
-                    if (file) upload(file);
+                    if (files.length) upload(files);
                   }}
                 />
               </label>
               <p className="text-xs text-ink/50">
-                For the best print, use a high-resolution image. A transparent PNG works best on shirts.
+                {gang
+                  ? "Select several files at once. Use high-resolution PNGs with a transparent background; images are placed at their natural size (300 DPI)."
+                  : "For the best print, use a high-resolution image. A transparent PNG works best on shirts."}
               </p>
+              {gang && library.length > 0 && (
+                <div>
+                  <span className="label">Your images · click to add again</span>
+                  <div className="grid grid-cols-4 gap-2">
+                    {library.map((img) => (
+                      <div key={img.url} className="group relative">
+                        <button
+                          type="button"
+                          disabled={!ready || !!busy}
+                          onClick={() => e?.addImage(img.url)}
+                          title={img.name}
+                          className="aspect-square w-full overflow-hidden rounded-lg border border-line bg-mist p-1 hover:border-navy/40"
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element -- user upload served by our API */}
+                          <img src={img.url} alt={img.name} className="h-full w-full object-contain" />
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!ready || !!busy}
+                          onClick={() => deleteImage(img)}
+                          aria-label={`Delete ${img.name}`}
+                          title="Delete this image"
+                          className="absolute -right-1.5 -top-1.5 grid h-5 w-5 place-items-center rounded-full bg-navy text-white shadow transition hover:bg-magenta focus-visible:bg-magenta"
+                        >
+                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" aria-hidden>
+                            <path d="M6 6l12 12M18 6 6 18" />
+                          </svg>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -391,6 +461,12 @@ export function Studio({ product, config, fonts, initial, initialVariant }: Stud
                 </div>
               )}
               {config.kind === "flat" && config.note && <p className="text-sm text-ink/60">{config.note}</p>}
+              {gang && (
+                <div className="rounded-lg bg-mist px-3 py-2 text-sm text-navy">
+                  Sheet used: <b>{used.toFixed(1)}&quot;</b> of {dims(variant)[1]}&quot;
+                  {used > dims(variant)[1] + 0.05 && <span className="block text-xs text-magenta">Your artwork runs past the end of the sheet. Pick a longer size.</span>}
+                </div>
+              )}
               {config.kind === "mockup" && (
                 <p className="text-sm text-ink/60">
                   You&apos;ll choose sizes and quantities when you add this design to your cart.
@@ -409,6 +485,17 @@ export function Studio({ product, config, fonts, initial, initialVariant }: Stud
           <div className="flex gap-1">
             <IconButton label="Undo" disabled={!hist.undo} onClick={() => e?.undo()} d="M9 14 4 9l5-5M4 9h11a5 5 0 0 1 0 10h-3" />
             <IconButton label="Redo" disabled={!hist.redo} onClick={() => e?.redo()} d="m15 14 5-5-5-5M20 9H9a5 5 0 0 0 0 10h3" />
+            {gang && (
+              <button
+                type="button"
+                disabled={!ready || !!busy || (counts[side] ?? 0) === 0}
+                onClick={() => e?.arrange()}
+                className="ml-1 rounded-lg border border-line bg-white px-3 text-sm font-medium text-navy transition hover:bg-mist disabled:opacity-40"
+                title="Pack every design onto the sheet, biggest first"
+              >
+                Auto-arrange
+              </button>
+            )}
           </div>
           {config.sides.length > 1 && (
             <div className="flex rounded-full bg-mist p-1 text-sm font-medium">
@@ -427,8 +514,15 @@ export function Studio({ product, config, fonts, initial, initialVariant }: Stud
             </div>
           )}
         </div>
-        <div ref={boxEl} className="relative grid min-h-[320px] place-items-center rounded-2xl bg-mist p-2">
-          <canvas ref={canvasEl} />
+        <div className="relative">
+          <div
+            ref={boxEl}
+            className={`grid min-h-[320px] rounded-2xl bg-mist p-2 ${
+              gang ? "max-h-[calc(100vh-14rem)] place-items-start justify-center overflow-y-auto [scrollbar-gutter:stable]" : "place-items-center"
+            }`}
+          >
+            <canvas ref={canvasEl} />
+          </div>
           {(!ready || busy) && (
             <div className="absolute inset-0 grid place-items-center rounded-2xl bg-white/70 text-sm font-medium text-navy backdrop-blur-sm">
               {busy ?? "Loading design studio…"}
@@ -436,7 +530,9 @@ export function Studio({ product, config, fonts, initial, initialVariant }: Stud
           )}
         </div>
         <p className="mt-2 text-center text-xs text-ink/50">
-          {e && e.bleedPx > 0 ? (
+          {gang ? (
+            <>Scroll to see the whole sheet. Designs outside the checkered sheet won&apos;t be printed.</>
+          ) : e && e.bleedPx > 0 ? (
             <>
               Blue line = final trimmed size · pink line = keep text inside · pink shaded edge = bleed: stretch backgrounds all the way out to it.
             </>
@@ -551,6 +647,57 @@ export function Studio({ product, config, fonts, initial, initialVariant }: Stud
                 </div>
               )}
 
+              {gang && sel.widthIn !== undefined && sel.kind !== "text" && sel.kind !== "group" && (
+                <div>
+                  <span className="label">Size (inches)</span>
+                  <div className="flex items-center gap-2">
+                    <input
+                      key={`w${sel.widthIn.toFixed(2)}`}
+                      type="number"
+                      min={0.25}
+                      step={0.25}
+                      defaultValue={Number(sel.widthIn.toFixed(2))}
+                      onBlur={(ev) => e?.setSizeIn("w", Number(ev.target.value))}
+                      onKeyDown={(ev) => ev.key === "Enter" && ev.currentTarget.blur()}
+                      className="field w-20 px-3 py-2"
+                      aria-label="Width in inches"
+                    />
+                    <span className="text-ink/40">×</span>
+                    <input
+                      key={`h${sel.heightIn!.toFixed(2)}`}
+                      type="number"
+                      min={0.25}
+                      step={0.25}
+                      defaultValue={Number(sel.heightIn!.toFixed(2))}
+                      onBlur={(ev) => e?.setSizeIn("h", Number(ev.target.value))}
+                      onKeyDown={(ev) => ev.key === "Enter" && ev.currentTarget.blur()}
+                      className="field w-20 px-3 py-2"
+                      aria-label="Height in inches"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {gang && sel.kind !== "group" && (
+                <div>
+                  <span className="label">Copies</span>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      min={1}
+                      max={200}
+                      value={copies}
+                      onChange={(ev) => setCopies(Math.min(200, Math.max(1, Math.floor(Number(ev.target.value) || 1))))}
+                      className="field w-20 px-3 py-2"
+                      aria-label="Number of copies"
+                    />
+                    <button type="button" onClick={() => addCopies(copies)} className="btn-outline flex-1 px-3 py-2 text-sm">
+                      Add copies
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <div>
                 <span className="label">Opacity</span>
                 <input
@@ -580,10 +727,17 @@ export function Studio({ product, config, fonts, initial, initialVariant }: Stud
 
         <div className="rounded-2xl bg-navy p-4 text-white">
           <p className="text-sm text-white/70">{product.name}</p>
-          <p className="mt-1 text-2xl font-bold">
-            {formatPrice(fromPrice(product) ?? 0)}
-            <span className="ml-1 text-sm font-normal text-white/60">and up</span>
-          </p>
+          {gang ? (
+            <>
+              <p className="text-sm text-white/70">{product.variants.find((v) => v.id === variant)?.label}</p>
+              <p className="mt-1 text-2xl font-bold">{formatPrice(product.variants.find((v) => v.id === variant)?.price ?? 0)}</p>
+            </>
+          ) : (
+            <p className="mt-1 text-2xl font-bold">
+              {formatPrice(fromPrice(product) ?? 0)}
+              <span className="ml-1 text-sm font-normal text-white/60">and up</span>
+            </p>
+          )}
           <button type="button" disabled={!ready || !!busy} onClick={() => (product.noQty ? saveAndAdd([{ variant, qty: 1 }]) : setCheckout(true))} className="btn mt-4 w-full bg-magenta text-white hover:brightness-110">
             Add to cart
           </button>

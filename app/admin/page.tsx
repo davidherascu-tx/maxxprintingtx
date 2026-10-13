@@ -3,7 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { allOrders, findDesign, ORDER_STATUSES } from "@/lib/db";
 import { updateOrderStatus } from "@/lib/actions";
 import { formatPrice, getProduct } from "@/lib/catalog";
-import { flatDims, getDesignConfig, printSpec } from "@/lib/design-config";
+import { flatDims, getDesignConfig, isGang, printSpec } from "@/lib/design-config";
 import { getCurrentUser, isAdmin } from "@/lib/session";
 
 export const metadata: Metadata = { title: "Orders", robots: { index: false } };
@@ -104,12 +104,17 @@ export default async function AdminPage() {
                           <a href={`/api/designs/${design.id}/${side}-print.png`} download className="btn-primary px-3 py-1.5 text-sm">
                             Print file{design.sides.length > 1 ? ` (${side})` : ""}
                           </a>
-                          <a href={`/api/designs/${design.id}/${side}-print.pdf`} download className="btn-outline px-3 py-1.5 text-sm">
-                            PDF
-                          </a>
-                          <a href={`/api/designs/${design.id}/${side}-print.pdf?marks=1`} download className="btn-outline px-3 py-1.5 text-sm">
-                            PDF + crop marks
-                          </a>
+                          {/* Gang sheets are too large to convert to PDF on the server: use the PNG. */}
+                          {!(config && isGang(config)) && (
+                            <>
+                              <a href={`/api/designs/${design.id}/${side}-print.pdf`} download className="btn-outline px-3 py-1.5 text-sm">
+                                PDF
+                              </a>
+                              <a href={`/api/designs/${design.id}/${side}-print.pdf?marks=1`} download className="btn-outline px-3 py-1.5 text-sm">
+                                PDF + crop marks
+                              </a>
+                            </>
+                          )}
                           {spec?.cut && (
                             <a href={`/api/designs/${design.id}/${side}-cut.svg`} download className="btn-outline px-3 py-1.5 text-sm">
                               Cut path

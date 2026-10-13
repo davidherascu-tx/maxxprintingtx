@@ -1,4 +1,4 @@
-import { getProduct, type Product } from "./catalog";
+import { GANG_SHEET_WIDTH_IN, getProduct, type Product } from "./catalog";
 
 /** Print area as fractions of the mockup image (0–1). */
 export type Area = { x: number; y: number; w: number; h: number };
@@ -22,6 +22,8 @@ export type DesignConfig =
       dims: Record<string, [number, number]>;
       size: [number, number];
       transparent?: boolean;
+      /** A gang sheet: many separate designs on one long transparent sheet. No bleed, safe zone or cut path. */
+      gang?: boolean;
       note?: string;
     };
 
@@ -80,6 +82,20 @@ const configs: Record<string, DesignConfig> = {
   "shaka-wear-shirt": tee("/products/apparel/1000052.png", "/products/apparel/1000052-back.png", { x: 0.33, y: 0.21, w: 0.33, h: 0.38 }),
   "gildan-shirt": tee("/products/apparel/1000020.png", "/products/apparel/1000020-back.png"),
   "softstyle-womens-pique-polo": tee("/products/apparel/1000004.png", "/products/apparel/1000004-back.png", { x: 0.33, y: 0.24, w: 0.34, h: 0.48 }, 10),
+  // DTF
+  "dtf-gang-sheet": {
+    kind: "flat",
+    shape: "rect",
+    sides: front,
+    // "22x48" -> 22" x 48"
+    dims: Object.fromEntries(
+      (getProduct("dtf-gang-sheet")?.variants ?? []).map((v) => [v.id, [GANG_SHEET_WIDTH_IN, Number(v.id.split("x")[1])] as [number, number]]),
+    ),
+    size: [GANG_SHEET_WIDTH_IN, 12],
+    transparent: true,
+    gang: true,
+    note: "Your sheet prints on a transparent background. Add as many designs as you like and pick the sheet length.",
+  },
   // Signage
   "die-cut-stickers": {
     kind: "flat",
@@ -146,6 +162,7 @@ export type PrintSpec = {
  * `dims` is the width × height in inches of a flat product.
  */
 export function printSpec(config: DesignConfig, dims: [number, number] = [1, 1]): PrintSpec {
+  if (isGang(config)) return { dpi: 300, goodDpi: 150, minDpi: 100, bleedIn: 0, safeIn: 0, cut: false };
   const flat = config.kind === "flat";
   const long = flat ? Math.max(...dims) : Math.max(...config.sides.map((s) => s.widthIn));
   const tier = long <= 14 ? { dpi: 300, goodDpi: 150, minDpi: 100 } : long <= 40 ? { dpi: 150, goodDpi: 100, minDpi: 72 } : { dpi: 100, goodDpi: 72, minDpi: 50 };
@@ -158,6 +175,8 @@ export function printSpec(config: DesignConfig, dims: [number, number] = [1, 1])
     cut,
   };
 }
+
+export const isGang = (config: DesignConfig) => config.kind === "flat" && !!config.gang;
 
 export function getDesignConfig(slug: string): DesignConfig | undefined {
   return configs[slug];

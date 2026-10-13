@@ -34,18 +34,18 @@ export const UPLOAD_TYPES: Record<string, string> = {
   "image/webp": "webp",
   "image/gif": "gif",
 };
-// Request bodies stay small so uploads work on any host; this leaves room for form overhead.
-export const MAX_UPLOAD_BYTES = 4 * 1024 * 1024;
-export const MAX_REQUEST_BYTES = 4.5 * 1000 * 1000;
+export { MAX_UPLOAD_BYTES, MAX_REQUEST_BYTES } from "./limits";
 
 const ID = /^[0-9a-f-]{36}$/;
 export const isId = (id: string) => ID.test(id);
 
 async function write(pathname: string, body: Buffer | string, contentType: string) {
+  const data = typeof body === "string" ? new TextEncoder().encode(body) : new Uint8Array(body);
+  // An explicit length keeps larger bodies from being sent chunked, which the storage service rejects (501).
   const res = await s3(`/${pathname}`, {
     method: "PUT",
-    headers: { "content-type": contentType },
-    body: typeof body === "string" ? body : new Uint8Array(body),
+    headers: { "content-type": contentType, "content-length": String(data.byteLength) },
+    body: data,
   });
   if (!res.ok) throw new Error(`Storage upload failed (${res.status}): ${await res.text()}`);
 }
@@ -63,6 +63,12 @@ export async function saveUpload(id: string, type: string, bytes: Buffer) {
 export async function readUpload(id: string) {
   if (!isId(id)) return null;
   return read(`uploads/${id}`);
+}
+
+export async function deleteUpload(id: string) {
+  if (!isId(id)) return;
+  const res = await s3(`/uploads/${id}`, { method: "DELETE" });
+  if (!res.ok && res.status !== 404) throw new Error(`Storage delete failed (${res.status})`);
 }
 
 /** Design files: `design.json`, `<side>-preview.png`, `<side>-print.png`, `<side>-cut.svg`. */

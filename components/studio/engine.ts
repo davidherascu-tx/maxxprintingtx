@@ -4,7 +4,7 @@
 // React component only deals with UI state.
 
 import type { Canvas, FabricImage, FabricObject, IText } from "fabric";
-import { CUT_MARGIN_IN, printSpec, type Area, type DesignConfig, type PrintSpec } from "@/lib/design-config";
+import { CUT_MARGIN_IN, isGang, printSpec, type Area, type DesignConfig, type PrintSpec } from "@/lib/design-config";
 import { cutPathSvg } from "./contour";
 import { withPngDpi } from "./png";
 
@@ -32,6 +32,9 @@ export type Selection =
       dpi?: number;
       goodDpi?: number;
       minDpi?: number;
+      /** Size on the finished product, in inches (images and shapes). */
+      widthIn?: number;
+      heightIn?: number;
     };
 
 const MOCKUP_SIZE = 600;
@@ -40,6 +43,13 @@ const PAD = 24;
 const MAX_PRINT_PX = 12000;
 const MAX_PRINT_AREA = 36_000_000;
 const CUT_OFFSET_IN = 0.05;
+// Gang sheets are drawn at a fixed scale so a 180" sheet stays usable; the page scrolls instead of shrinking.
+const GANG_PX_PER_IN = 20;
+const GANG_GAP_IN = 0.25;
+// An uploaded image is placed at its native size, assuming it was made for 300 DPI printing.
+const GANG_NATIVE_DPI = 300;
+const MAX_GANG_PRINT_PX = 30000;
+const MAX_GANG_PRINT_AREA = 50_000_000;
 
 export class StudioEngine {
   canvas: Canvas;
@@ -91,6 +101,10 @@ export class StudioEngine {
 
   dispose() {
     return this.canvas.dispose();
+  }
+
+  get gang() {
+    return isGang(this.config);
   }
 
   // ---------- layout ----------
@@ -150,7 +164,7 @@ export class StudioEngine {
       c.backgroundImage = img;
     } else {
       const [wIn, hIn] = dims;
-      const k = FLAT_LONG_SIDE / Math.max(wIn, hIn);
+      const k = this.gang ? GANG_PX_PER_IN : FLAT_LONG_SIDE / Math.max(wIn, hIn);
       const width = wIn * k, height = hIn * k;
       this.pxPerIn = k;
       this.bleedPx = this.spec.bleedIn * k;
@@ -225,7 +239,10 @@ export class StudioEngine {
 
   /** Scale the canvas element to fit the available box. */
   fit(maxWidth: number, maxHeight: number) {
-    const z = Math.min(maxWidth / this.logical.width, maxHeight / this.logical.height, 1.6);
+    // Gang sheets fill the width and scroll vertically.
+    const z = this.gang
+      ? Math.min(maxWidth / this.logical.width, 1.2)
+      : Math.min(maxWidth / this.logical.width, maxHeight / this.logical.height, 1.6);
     this.canvas.setDimensions({ width: Math.floor(this.logical.width * z), height: Math.floor(this.logical.height * z) });
     this.canvas.setZoom(z);
     this.canvas.requestRenderAll();
@@ -308,8 +325,18 @@ export class StudioEngine {
 
   async addImage(url: string) {
     const img = await this.f.FabricImage.fromURL(url);
-    const s = Math.min((this.area.width * 0.8) / img.width, (this.area.height * 0.8) / img.height);
-    img.set({ ...this.center, scaleX: s, scaleY: s });
+    if (this.gang) {
+      // Native size (capped to the sheet width), dropped into the first free spot.
+      const wIn = Math.min(Math.max(img.width / GANG_NATIVE_DPI, 1), this.widthIn);
+      const s = (wIn * this.pxPerIn) / img.width;
+      img.set({ scaleX: s, scaleY: s });
+      const w = img.getScaledWidth(), h = img.getScaledHeight();
+      const spot = this.findSpot(w, h);
+      img.set(spot ? { left: spot.left + w / 2, top: spot.top + h / 2 } : this.center);
+    } else {
+      const s = Math.min((this.area.width * 0.8) / img.width, (this.area.height * 0.8) / img.height);
+      img.set({ ...this.center, scaleX: s, scaleY: s });
+    }
     this.place(img);
     this.commit();
   }
@@ -354,10 +381,110 @@ export class StudioEngine {
   async duplicate() {
     const obj = this.active;
     if (!obj) return;
+    if (this.gang && !(obj instanceof this.f.ActiveSelection) && (await this.copies(1)) === 1) return;
     const copy = await obj.clone();
     copy.set({ left: (obj.left ?? 0) + 16, top: (obj.top ?? 0) + 16 });
     this.place(copy);
     this.commit();
+  }
+
+  // ---------- gang sheet layout ----------
+
+  /** Top-left of the first free rectangle of `w` x `h` on the sheet, scanning top to bottom. */
+  private findSpot(w: number, h: number) {
+    const gap = GANG_GAP_IN * this.pxPerIn;
+    const step = this.pxPerIn / 4;
+    const boxes = this.userObjects().map((o) => o.getBoundingRect());
+    const { left, top, width, height } = this.area;
+    for (let y = top; y + h <= top + height + 0.5; y += step) {
+      for (let x = left; x + w <= left + width + 0.5; x += step) {
+        const hit = boxes.some((b) => x < b.left + b.width + gap && x + w + gap > b.left && y < b.top + b.height + gap && y + h + gap > b.top);
+        if (!hit) return { left: x, top: y };
+      }
+    }
+    return null;
+  }
+
+  /** Add `n` copies of the selected item into free spots. Returns how many fit on the sheet. */
+  async copies(n: number) {
+    const obj = this.active;
+    if (!obj || obj instanceof this.f.ActiveSelection) return 0;
+    let made = 0;
+    for (let i = 0; i < n; i++) {
+      const copy = await obj.clone();
+      const b = copy.getBoundingRect();
+      const spot = this.findSpot(b.width, b.height);
+      if (!spot) break;
+      copy.set({ left: (copy.left ?? 0) + spot.left - b.left, top: (copy.top ?? 0) + spot.top - b.top });
+      copy.setCoords();
+      this.place(copy, false);
+      made++;
+    }
+    if (made) {
+      this.commit();
+      this.onChange();
+    }
+    return made;
+  }
+
+  /** Repack every item on the sheet, biggest first, left to right in rows. */
+  arrange() {
+    const objs = this.userObjects();
+    if (objs.length === 0) return;
+    this.canvas.discardActiveObject();
+    const { left, top, width } = this.area;
+    const gap = GANG_GAP_IN * this.pxPerIn;
+    for (const o of objs) {
+      const w = o.getBoundingRect().width;
+      if (w > width) {
+        const k = width / w;
+        o.set({ scaleX: (o.scaleX ?? 1) * k, scaleY: (o.scaleY ?? 1) * k });
+        o.setCoords();
+      }
+    }
+    const items = objs.map((o) => ({ o, b: o.getBoundingRect() })).sort((a, b) => b.b.height - a.b.height);
+    let x = 0, y = 0, rowH = 0;
+    for (const { o, b } of items) {
+      if (x > 0 && x + b.width > width + 0.5) {
+        x = 0;
+        y += rowH + gap;
+        rowH = 0;
+      }
+      o.set({ left: (o.left ?? 0) + left + x - b.left, top: (o.top ?? 0) + top + y - b.top });
+      o.setCoords();
+      x += b.width + gap;
+      rowH = Math.max(rowH, b.height);
+    }
+    this.canvas.requestRenderAll();
+    this.commit();
+    this.onChange();
+  }
+
+  /** Length of the sheet taken up by artwork, in inches. */
+  usedLengthIn() {
+    const bottom = Math.max(this.area.top, ...this.userObjects().map((o) => { const b = o.getBoundingRect(); return b.top + b.height; }));
+    return (bottom - this.area.top) / this.pxPerIn;
+  }
+
+  /** Resize the selected image or shape to a width or height in inches, keeping its proportions. */
+  setSizeIn(axis: "w" | "h", inches: number) {
+    const obj = this.active;
+    if (!obj || obj instanceof this.f.ActiveSelection || obj instanceof this.f.IText || !(inches > 0)) return;
+    const k = (inches * this.pxPerIn) / (axis === "w" ? obj.getScaledWidth() : obj.getScaledHeight());
+    this.update({ scaleX: (obj.scaleX ?? 1) * k, scaleY: (obj.scaleY ?? 1) * k });
+  }
+
+  /** Take every placed copy of an uploaded image off the sheet. Returns how many were removed. */
+  removeImage(url: string) {
+    const objs = this.userObjects().filter((o) => o instanceof this.f.FabricImage && o.getSrc().endsWith(url));
+    if (objs.length === 0) return 0;
+    this.canvas.discardActiveObject();
+    this.canvas.remove(...objs);
+    this.canvas.requestRenderAll();
+    // Undo can't bring back a file that's gone from storage, so start the history fresh.
+    this.resetHistory();
+    this.onChange();
+    return objs.length;
   }
 
   remove() {
@@ -404,6 +531,7 @@ export class StudioEngine {
     const obj = this.active;
     if (!obj) return null;
     const opacity = obj.opacity ?? 1;
+    const size = { widthIn: obj.getScaledWidth() / this.pxPerIn, heightIn: obj.getScaledHeight() / this.pxPerIn };
     if (obj instanceof this.f.ActiveSelection) return { kind: "group", opacity };
     if (obj instanceof this.f.IText) {
       return {
@@ -430,9 +558,10 @@ export class StudioEngine {
         dpi: Math.round((el.naturalWidth || obj.width) / inches),
         goodDpi: this.spec.goodDpi,
         minDpi: this.spec.minDpi,
+        ...size,
       };
     }
-    return { kind: "shape", fill: typeof obj.fill === "string" ? obj.fill : "#000000", opacity };
+    return { kind: "shape", fill: typeof obj.fill === "string" ? obj.fill : "#000000", opacity, ...size };
   }
 
   /** Set font size in on-screen terms, folding any scaling back into fontSize. */
@@ -565,10 +694,13 @@ export class StudioEngine {
     const safe = spec.safeIn * this.pxPerIn;
     const bleed = this.bleedPx;
     const label = this.config.sides.length > 1 ? ` (${this.config.sides.find((s) => s.id === this.side)?.label})` : "";
-    let soft = 0, offSafe = 0, shortBleed = 0;
+    let soft = 0, offSafe = 0, shortBleed = 0, offSheet = 0;
 
     for (const o of this.userObjects()) {
       const b = o.getBoundingRect();
+      if (this.gang && (b.left < area.left - 1 || b.top < area.top - 1 || b.left + b.width > area.left + area.width + 1 || b.top + b.height > area.top + area.height + 1)) {
+        offSheet++;
+      }
       if (o instanceof f.FabricImage) {
         const el = o.getElement() as HTMLImageElement;
         const dpi = (el.naturalWidth || o.width) / ((o.getScaledWidth() / area.width) * this.widthIn);
@@ -585,6 +717,7 @@ export class StudioEngine {
         if (gaps.some((g) => g > -bleed * 0.9 && g < bleed * 0.75 + 1 && Math.abs(g) < bleed * 4)) shortBleed++;
       }
     }
+    if (offSheet) issues.push(`${offSheet === 1 ? "An item hangs" : `${offSheet} items hang`} over the edge of the sheet and will be cut off. Move ${offSheet === 1 ? "it" : "them"} inside or choose a longer sheet.`);
     if (soft) issues.push(`${soft === 1 ? "An image is" : `${soft} images are`} below ${spec.minDpi} DPI at this size and will print soft${label}.`);
     if (offSafe) issues.push(`Text is outside the safe zone (pink dashed line) and may be trimmed off${label}.`);
     if (shortBleed) issues.push(`Artwork stops near the trim line. Stretch it to the outer edge of the pink bleed zone to avoid white borders${label}.`);
@@ -614,7 +747,7 @@ export class StudioEngine {
     const crop = isFlat
       ? { left: this.area.left * z, top: this.area.top * z, width: this.area.width * z, height: this.area.height * z }
       : { left: 0, top: 0, width: this.logical.width * z, height: this.logical.height * z };
-    const previewPx = 800;
+    const previewPx = this.gang ? 1600 : 800;
     const preview = c.toCanvasElement(previewPx / Math.max(crop.width, crop.height), { ...crop, filter: notGuide });
 
     // Print file: print area plus bleed, no mockup. Contour-cut files keep a small transparent margin.
@@ -631,7 +764,9 @@ export class StudioEngine {
 
     const longIn = Math.max(sizeIn.width, sizeIn.height);
     const aspect = sizeIn.width / sizeIn.height;
-    const maxLong = Math.min(MAX_PRINT_PX, Math.sqrt(MAX_PRINT_AREA * Math.max(aspect, 1 / aspect)));
+    const maxPx = this.gang ? MAX_GANG_PRINT_PX : MAX_PRINT_PX;
+    const maxArea = this.gang ? MAX_GANG_PRINT_AREA : MAX_PRINT_AREA;
+    const maxLong = Math.min(maxPx, Math.sqrt(maxArea * Math.max(aspect, 1 / aspect)));
     const printPx = Math.min(maxLong, longIn * spec.dpi) * scale;
     const dpi = Math.round(printPx / longIn);
     const area = {

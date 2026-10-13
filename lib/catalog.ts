@@ -52,6 +52,12 @@ export const categories: Category[] = [
     image: "/products/headwear/richardson-112.png",
   },
   {
+    slug: "dtf",
+    name: "DTF Transfers",
+    blurb: "Build a gang sheet of your designs, ready to heat press.",
+    image: "/products/dtf/gang-sheet.svg",
+  },
+  {
     slug: "stickers",
     name: "Stickers",
     blurb: "Die cut, clear and shaped stickers, plus business cards.",
@@ -105,7 +111,39 @@ const stickerGrid = (packs: number[], prices: Record<number, number[]>): Variant
     })),
   );
 
+/** DTF gang sheets are 22" wide and 12" to 180" long, in 12" steps, at a flat price per foot. */
+export const GANG_SHEET_WIDTH_IN = 22;
+const GANG_PRICE_PER_FOOT = 6;
+const gangSheetSizes = (): Variant[] =>
+  Array.from({ length: 15 }, (_, i) => {
+    const feet = i + 1;
+    return {
+      id: `${GANG_SHEET_WIDTH_IN}x${feet * 12}`,
+      label: `${GANG_SHEET_WIDTH_IN}" x ${feet * 12}"`,
+      price: feet * GANG_PRICE_PER_FOOT,
+    };
+  });
+
 export const products: Product[] = [
+  // DTF Transfers
+  {
+    slug: "dtf-gang-sheet",
+    name: "DTF Gang Sheet Builder",
+    category: "dtf",
+    image: "/products/dtf/gang-sheet.svg",
+    description:
+      "Upload your artwork, arrange as many designs as you like on one sheet and pick the length. We print it as a direct-to-film transfer, ready for your heat press.",
+    features: [
+      'Sheet width: 22"',
+      "Upload as many images as you need",
+      "Auto-arrange to pack your sheet",
+      "Transparent background, no contour cut needed",
+    ],
+    variantLabel: "DTF Gang Sheet Size",
+    variants: gangSheetSizes(),
+    minQty: 1,
+    featured: true,
+  },
   // Yard Signs
   {
     slug: "coroplast-yard-signs",

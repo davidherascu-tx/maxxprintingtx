@@ -37,6 +37,20 @@ export function VariantPicker({ product, value, onChange, compact }: Props) {
     </fieldset>
   );
 
+  // Long lists of sizes (e.g. gang sheet lengths) read better as a dropdown.
+  if (!current.group && variants.length > 8) {
+    return (
+      <div className={compact ? "" : "mt-6"}>
+        <label htmlFor="variant-select" className="label">{product.variantLabel}</label>
+        <select id="variant-select" value={current.id} onChange={(ev) => onChange(ev.target.value)} className="field">
+          {variants.map((v) => (
+            <option key={v.id} value={v.id}>{v.label}</option>
+          ))}
+        </select>
+      </div>
+    );
+  }
+
   if (!current.group) {
     return row(
       product.variantLabel,
