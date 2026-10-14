@@ -3,14 +3,15 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import { formatAddress, readAddress, type Address } from "./address";
 import {
   claimDesigns, createOrder, createUser, deleteDesign, deleteUnpaidOrder, findDesign, findOrder, findUserByEmail,
-  moveApproval, unpaidOrdersForUser, updateUser,
+  addOrderEvent, markEmailVerified, requestRefund, saveUserAddresses, setUserPassword, unpaidOrdersForUser, updateUser,
 } from "./db";
 import { deleteDesignFiles } from "./files";
 import { deleteStaffSession } from "./staff-session";
-import { activationRequired, emailProofAnswer } from "./email";
-import { sendActivationEmail } from "./verification";
+import { activationRequired, emailConfigured, emailRefundRequested } from "./email";
+import { readResetToken, sendActivationEmail, sendPasswordResetEmail } from "./verification";
 import { createSession, deleteSession, getCurrentUser, hashPassword, verifyPassword } from "./session";
 import { colorOf } from "./catalog";
 import { getCatalog, getSettings } from "./store";
@@ -188,9 +189,20 @@ export async function placeOrder(_: FormState, form: FormData): Promise<FormStat
   if (!settings[fulfillment].enabled) {
     return { error: fulfillment === "delivery" ? "Delivery isn't available right now. Please choose pickup." : "Store pickup isn't available right now. Please choose delivery." };
   }
-  const address = str(form, "address");
-  if (fulfillment === "delivery" && address.length < 8) {
-    return { error: "Please enter a delivery address." };
+  const billingAddress = readAddress(form, "billing");
+  if (!billingAddress) return { error: "Please enter your billing address." };
+  if (typeof billingAddress === "string") return { error: `Billing address: ${billingAddress}` };
+  let shippingAddress: Address | undefined;
+  if (fulfillment === "delivery") {
+    const same = form.get("shippingSame") === "on";
+    const ship = same ? billingAddress : readAddress(form, "shipping");
+    if (!ship) return { error: "Please enter a delivery address." };
+    if (typeof ship === "string") return { error: `Delivery address: ${ship}` };
+    shippingAddress = ship;
+  }
+  if (form.get("saveAddresses") === "on") {
+    const keepShipping = fulfillment === "delivery" ? (form.get("shippingSame") === "on" ? null : shippingAddress!) : (user.shippingAddress ?? null);
+    await saveUserAddresses(user.id, billingAddress, keepShipping);
   }
 
   if (!paymentsConfigured()) {
@@ -206,7 +218,9 @@ export async function placeOrder(_: FormState, form: FormData): Promise<FormStat
     tax: calcTax(subtotal, settings.taxRate),
     notes: str(form, "notes").slice(0, 2000),
     fulfillment,
-    address: fulfillment === "delivery" ? address : undefined,
+    address: shippingAddress ? formatAddress(shippingAddress) : undefined,
+    billingAddress,
+    shippingAddress,
   });
 
   let url: string;
@@ -259,30 +273,80 @@ export async function payOrder(form: FormData) {
   redirect(url);
 }
 
-/** The customer approves the proof staff sent. */
-export async function approveProof(form: FormData) {
-  const user = await getCurrentUser();
-  if (!user) redirect("/signin");
-  const order = await findOrder(str(form, "id"));
-  if (!order || order.userId !== user.id) return;
-  const moved = await moveApproval(order.id, ["proof_sent"], "approved", { actor: "customer", actorName: user.name, kind: "approved", note: "" });
-  if (moved) await emailProofAnswer(order, user, true, "");
-  revalidatePath("/account");
-  revalidatePath("/admin", "layout");
+
+/** "Forgot password?": email a reset link. Same answer whether or not the account exists. */
+export async function requestPasswordReset(_: FormState, form: FormData): Promise<FormState> {
+  const email = str(form, "email").toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { error: "Please enter a valid email." };
+  if (!emailConfigured()) return { error: "Password reset by email isn't available right now. Please call us and we'll help." };
+  const user = await findUserByEmail(email);
+  if (user) await sendPasswordResetEmail(user);
+  return { ok: `If ${email} has an account, we've sent it a link to choose a new password. Check your inbox and spam folder; the link works for 1 hour.` };
 }
 
-/** The customer asks for changes to the proof. */
-export async function requestProofChanges(_: FormState, form: FormData): Promise<FormState> {
+/** The form behind the reset link: set the new password, then sign in. */
+export async function resetPassword(_: FormState, form: FormData): Promise<FormState> {
+  const user = await readResetToken(str(form, "token"));
+  if (!user) return { error: "This reset link has expired or was already used. Please ask for a new one." };
+  const password = String(form.get("password") ?? "");
+  if (password.length < 8) return { error: "Password must be at least 8 characters." };
+  if (password !== String(form.get("confirm") ?? "")) return { error: "The passwords don't match." };
+  await setUserPassword(user.id, await hashPassword(password));
+  // They got the link by email, so the address is confirmed too.
+  if (!user.emailVerifiedAt) await markEmailVerified(user.id, user.email);
+  await createSession(user.id);
+  redirect("/account?password_reset=1");
+}
+
+/** Save one address from My account → Addresses (the other one stays as it is). */
+export async function saveMyAddress(_: FormState, form: FormData): Promise<FormState> {
   const user = await getCurrentUser();
   if (!user) redirect("/signin");
+  const kind = str(form, "kind") === "shipping" ? "shipping" : "billing";
+  if (kind === "shipping" && form.get("shippingSame") === "on") {
+    await saveUserAddresses(user.id, user.billingAddress ?? null, null);
+  } else {
+    const address = readAddress(form, kind);
+    if (!address) return { error: "Please fill in the address." };
+    if (typeof address === "string") return { error: address };
+    if (kind === "billing") await saveUserAddresses(user.id, address, user.shippingAddress ?? null);
+    else await saveUserAddresses(user.id, user.billingAddress ?? null, address);
+  }
+  revalidatePath("/account");
+  revalidatePath("/checkout");
+  return { ok: kind === "billing" ? "Billing address saved." : "Shipping address saved." };
+}
+
+/** My account → Profile: change the password (needs the current one). Other devices are signed out. */
+export async function changePassword(_: FormState, form: FormData): Promise<FormState> {
+  const current = await getCurrentUser();
+  if (!current) redirect("/signin");
+  const user = await findUserByEmail(current.email);
+  if (!user || !(await verifyPassword(String(form.get("current") ?? ""), user.passwordHash))) {
+    return { error: "Your current password is incorrect." };
+  }
+  const password = String(form.get("password") ?? "");
+  if (password.length < 8) return { error: "The new password must be at least 8 characters." };
+  if (password !== String(form.get("confirm") ?? "")) return { error: "The new passwords don't match." };
+  if (await verifyPassword(password, user.passwordHash)) return { error: "That's your current password. Choose a new one." };
+  await setUserPassword(user.id, await hashPassword(password));
+  // The change signs out every session; start a fresh one on this device.
+  await createSession(user.id);
+  return { ok: "Password changed. You're still signed in here; other devices were signed out." };
+}
+
+/** My account → an order → "Request a refund". */
+export async function requestRefundAction(_: FormState, form: FormData): Promise<FormState> {
+  const user = await getCurrentUser();
+  if (!user) redirect("/signin");
+  const reason = str(form, "reason").slice(0, 3000);
+  if (reason.length < 10) return { error: "Please tell us what went wrong (a sentence or two)." };
   const order = await findOrder(str(form, "id"));
   if (!order || order.userId !== user.id) return { error: "Order not found." };
-  const note = str(form, "note").slice(0, 3000);
-  if (note.length < 3) return { error: "Please tell us what to change." };
-  const moved = await moveApproval(order.id, ["proof_sent"], "changes_requested", { actor: "customer", actorName: user.name, kind: "changes_requested", note });
-  if (!moved) return { error: "This proof can't be changed anymore. Please call us." };
-  await emailProofAnswer(order, user, false, note);
+  if (!(await requestRefund(order.id, user.id, reason))) return { error: "This order already has a refund request or was refunded." };
+  await addOrderEvent(order.id, { actor: "customer", actorName: user.name, kind: "refund_requested", note: reason });
+  await emailRefundRequested(order, user, reason);
   revalidatePath("/account");
   revalidatePath("/admin", "layout");
-  return { ok: "Thanks! We'll update your proof and send a new one." };
+  return { ok: "Thanks. We got your request and will get back to you within 1 to 2 business days." };
 }

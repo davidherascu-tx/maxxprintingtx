@@ -80,12 +80,7 @@ export async function deleteUpload(id: string) {
   if (!res.ok && res.status !== 404) throw new Error(`Storage delete failed (${res.status})`);
 }
 
-/** Proof images staff send to a customer, kept per order. */
-export async function saveProofImage(orderId: string, imageId: string, type: string, bytes: Buffer) {
-  if (!isId(orderId) || !isId(imageId)) throw new Error("Invalid proof id");
-  await write(`proofs/${orderId}/${imageId}`, bytes, type);
-}
-
+/** Proof images from the earlier customer-proof flow, still shown in old orders' history. */
 export async function readProofImage(orderId: string, imageId: string) {
   if (!isId(orderId) || !isId(imageId)) return null;
   return read(`proofs/${orderId}/${imageId}`);

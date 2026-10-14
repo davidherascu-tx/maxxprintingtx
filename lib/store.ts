@@ -27,6 +27,6 @@ export const getSettings = cache(async (): Promise<StoreSettings> => {
 export const getSite = async () => (await getSettings()).site;
 
 export async function getPublicSettings(): Promise<PublicSettings> {
-  const { taxRate, pickup, delivery } = await getSettings();
-  return { taxRate, pickup, delivery };
+  const { taxRate, pickup, delivery, returnPolicy } = await getSettings();
+  return { taxRate, pickup, delivery, returnPolicy };
 }

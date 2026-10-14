@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
-import { saveStoreSettings } from "@/lib/admin-actions";
+import { saveStoreSettings, sendTestEmailAction } from "@/lib/admin-actions";
+import { emailConfigured } from "@/lib/email";
 import { requireStaff } from "@/lib/staff-session";
 import { getSettings } from "@/lib/store";
 import { AdminForm } from "@/components/admin/admin-form";
@@ -19,7 +20,7 @@ function Field({ name, label, value, type = "text", required, hint }: { name: st
 
 export default async function AdminSettings() {
   await requireStaff("/admin/settings");
-  const { site, taxRate, pickup, delivery, notifyEmail } = await getSettings();
+  const { site, taxRate, pickup, delivery, notifyEmail, returnPolicy } = await getSettings();
 
   return (
     <>
@@ -51,12 +52,18 @@ export default async function AdminSettings() {
             <legend className="mb-3 font-semibold text-navy">Order notifications</legend>
             <Field
               name="notifyEmail"
-              label="Email new orders and proof answers to"
+              label="Email new orders to"
               type="email"
               value={notifyEmail}
               required
               hint="Not shown on the website. Customer replies to shop emails also go here."
             />
+          </fieldset>
+
+          <fieldset>
+            <legend className="mb-3 font-semibold text-navy">Return & refund policy</legend>
+            <textarea name="returnPolicy" rows={4} defaultValue={returnPolicy} aria-label="Return and refund policy" className="field" />
+            <p className="mt-1 text-xs text-ink/50">Shown on the Ordering page, at checkout and when a customer asks for a refund. Leave empty to use the standard text.</p>
           </fieldset>
 
           <fieldset className="grid gap-4 sm:grid-cols-2">
@@ -90,6 +97,20 @@ export default async function AdminSettings() {
               </div>
             </div>
           </fieldset>
+        </AdminForm>
+      </Card>
+
+      <Card title="Email" className="mt-6">
+        <p className="mb-4 text-sm text-ink/60">
+          {emailConfigured()
+            ? `Emails are sent through your mail server (${process.env.SMTP_HOST}). Send a test to check it works, for example to a Gmail address.`
+            : "Email isn't set up yet: add SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD and EMAIL_FROM to the server settings."}
+        </p>
+        <AdminForm action={sendTestEmailAction} submit="Send test email" className="flex flex-wrap items-end gap-3">
+          <div className="min-w-64 flex-1">
+            <label htmlFor="test-to" className="label">Send to</label>
+            <input id="test-to" name="to" type="email" placeholder={notifyEmail} className="field" />
+          </div>
         </AdminForm>
       </Card>
     </>

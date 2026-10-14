@@ -3,11 +3,13 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { formatPrice } from "@/lib/catalog";
 import { eventsForOrders, findDesign, findOrderByNumber, ORDER_STATUSES } from "@/lib/db";
-import { designSource, flatDims, getDesignConfig, isGang, printSpec } from "@/lib/design-config";
+import { designSource, flatDims, getDesignConfig, isGang, needsDesignCheck, printSpec } from "@/lib/design-config";
 import {
-  approveForCustomer, artworkResolved, flagArtwork, recordPayment, saveOrderNotes, sendProof, updateOrderStatus,
+  approveDesign, artworkResolved, declineRefundAction, flagArtwork, recordPayment, refundOrderAction, saveOrderNotes, updateOrderStatus,
 } from "@/lib/admin-actions";
 import { ApprovalBadge, ApprovalHistory, SourceBadge } from "@/components/approval";
+import { nextStep, STEPS, stepsDone } from "@/lib/order-steps";
+import { addressLines } from "@/lib/address";
 import { requireStaff } from "@/lib/staff-session";
 import { getCatalog } from "@/lib/store";
 import { AdminForm, SubmitButton } from "@/components/admin/admin-form";
@@ -31,17 +33,23 @@ export default async function AdminOrder({ params }: Props) {
   const designs = new Map((await Promise.all(ids.map((id) => findDesign(id)))).flatMap((d) => (d ? [[d.id, d] as const] : [])));
   const events = await eventsForOrders([order.id]);
   const placed = order.paymentStatus !== "unpaid";
-  const canProof = ["review", "changes_requested", "proof_sent"].includes(order.approval);
+  const hasDesign = needsDesignCheck(order.items);
+  const toCheck = ["review", "changes_requested", "proof_sent"].includes(order.approval);
 
   return (
     <>
-      <Link href="/admin/orders" className="text-sm text-ink/60 hover:text-navy">← Orders</Link>
+      <Link href="/admin/orders" className="text-base font-semibold text-navy hover:underline">← Back to orders</Link>
       <PageHeader title={`Order ${order.number}`}>
         <div className="flex flex-wrap items-center gap-2">
           <PaymentBadge status={order.paymentStatus} />
+          {order.refundStatus === "requested" && <span className="rounded-full bg-magenta px-2.5 py-0.5 text-xs font-semibold text-white">Refund requested</span>}
+          {(order.refundStatus === "refunded" || order.refundStatus === "partial") && (
+            <span className="rounded-full bg-mist px-2.5 py-0.5 text-xs font-semibold text-navy">{order.refundStatus === "refunded" ? "Refunded" : "Partly refunded"}</span>
+          )}
           {placed && <ApprovalBadge approval={order.approval} />}
           <StatusBadge status={order.status} />
           <Link href={`/admin/orders/${order.number}/slip`} className="btn-outline px-4 py-2">Packing slip</Link>
+          <Link href={`/admin/orders/${order.number}/invoice`} className="btn-outline px-4 py-2">📄 Invoice</Link>
         </div>
       </PageHeader>
       <p className="-mt-4 mb-6 text-sm text-ink/60">
@@ -49,64 +57,117 @@ export default async function AdminOrder({ params }: Props) {
         {order.paidAt && ` · paid ${dateTime(order.paidAt)}`}
       </p>
 
+      {/* Where the order is, and the one thing to do next. */}
+      <ol className="mb-4 grid grid-cols-3 gap-2 sm:grid-cols-6" aria-label="Order progress">
+        {STEPS.map((s, i) => {
+          const done = i < stepsDone(order);
+          const current = i === stepsDone(order);
+          return (
+            <li
+              key={s.label}
+              aria-current={current ? "step" : undefined}
+              className={`flex flex-col items-center rounded-2xl px-2 py-3 text-center text-sm font-semibold ${
+                done ? "bg-navy text-white" : current ? "bg-yellow/30 text-navy ring-2 ring-yellow" : "bg-mist text-ink/40"
+              }`}
+            >
+              <span aria-hidden className="text-2xl">{done ? "✔️" : s.icon}</span>
+              {i + 1}. {s.label}
+            </li>
+          );
+        })}
+      </ol>
+      {(() => {
+        const next = nextStep(order);
+        const advance =
+          order.approval === "approved" && order.paymentStatus !== "unpaid" && order.refundStatus !== "requested" && order.refundStatus !== "refunded"
+            ? order.status === "Received"
+              ? { to: "In production", label: "🖨️ Start printing" }
+              : order.status === "In production"
+                ? { to: "Ready", label: "📦 It's finished: mark Ready" }
+                : order.status === "Ready"
+                  ? { to: "Completed", label: "✅ Customer has it: mark Done" }
+                  : null
+            : null;
+        return (
+          <div className={`mb-6 flex flex-wrap items-center gap-4 rounded-3xl border-2 p-5 ${next.yourTurn ? "border-yellow bg-yellow/10" : "border-line bg-mist"}`}>
+            <span aria-hidden className="text-4xl">{next.icon}</span>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold uppercase tracking-wide text-ink/50">{next.yourTurn ? "Your next step" : "Next"}</p>
+              <p className="text-xl font-bold text-navy">{next.text}</p>
+              {advance?.to === "Ready" && <p className="text-sm text-ink/60">The customer gets an email that their order is ready.</p>}
+            </div>
+            {advance && (
+              <form action={updateOrderStatus}>
+                <input type="hidden" name="id" value={order.id} />
+                <input type="hidden" name="status" value={advance.to} />
+                <SubmitButton className="rounded-full bg-navy px-6 py-4 text-lg font-bold text-white shadow hover:bg-navy-700">{advance.label}</SubmitButton>
+              </form>
+            )}
+            {order.refundStatus === "requested" && (
+              <a href="#refund" className="rounded-full bg-navy px-6 py-4 text-lg font-bold text-white shadow hover:bg-navy-700">↩️ Answer the request</a>
+            )}
+            {order.refundStatus !== "requested" && !advance && toCheck && order.paymentStatus !== "unpaid" && (
+              <form action={approveDesign}>
+                <input type="hidden" name="id" value={order.id} />
+                <SubmitButton
+                  className="rounded-full bg-navy px-6 py-4 text-lg font-bold text-white shadow hover:bg-navy-700"
+                  confirm={`Approve the design for ${order.number}? The customer gets an email and the order can be printed.`}
+                >
+                  ✅ Approve design
+                </SubmitButton>
+              </form>
+            )}
+          </div>
+        );
+      })()}
+
       <div className="grid gap-6 xl:grid-cols-[1fr_20rem]">
         <div className="space-y-6">
-          {placed && (
-            <Card title="Artwork approval">
+          {placed && hasDesign && (
+            <Card title="🎨 Design check" className="scroll-mt-24" id="approval">
               <div className="mb-4 flex flex-wrap items-center gap-3">
                 <ApprovalBadge approval={order.approval} />
-                <p className="text-sm text-ink/60">
-                  {order.approval === "review" && "Check the artwork, then send the customer a proof (or tell them what's missing)."}
-                  {order.approval === "artwork_issue" && "Waiting for the customer to send new artwork. Mark it received when it arrives."}
-                  {order.approval === "proof_sent" && "The customer can approve the proof or ask for changes in their account."}
-                  {order.approval === "changes_requested" && "The customer asked for changes (see the history below). Send an updated proof."}
-                  {order.approval === "approved" && "Approved. You can move this order to production."}
+                <p className="text-base text-ink/70">
+                  {toCheck && "Look at the design previews and print files below. If it looks good, press Approve design."}
+                  {order.approval === "artwork_issue" && "You asked the customer to change their design. When they send it, press the button below."}
+                  {order.approval === "approved" && "Design approved. This order can be printed."}
                 </p>
               </div>
-              {order.approval !== "approved" && (
-                <p className="mb-4 rounded-lg bg-yellow/20 px-3 py-2 text-xs text-navy">
-                  The customer gets an email when you send a proof or ask for artwork (if email is set up), and staff get one when they answer.
-                </p>
-              )}
 
               <div className="grid gap-4 lg:grid-cols-2">
-                {canProof && (
-                  <div className="rounded-xl border border-line p-4">
-                    <p className="mb-3 text-sm font-semibold text-navy">{order.approval === "proof_sent" ? "Send an updated proof" : "Send proof"}</p>
-                    <AdminForm action={sendProof} submit="Send proof to customer">
-                      <input type="hidden" name="id" value={order.id} />
-                      <textarea name="note" rows={3} aria-label="Message to the customer" placeholder="Message to the customer (optional): sizes, colors, placement…" className="field" />
-                      <div>
-                        <label htmlFor="proof-image" className="label">Proof image (optional, up to 8 MB)</label>
-                        <input id="proof-image" name="image" type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="block w-full text-sm" />
-                        <p className="mt-1 text-xs text-ink/50">The customer also sees the design previews from their order.</p>
-                      </div>
-                    </AdminForm>
-                  </div>
+                {toCheck && (
+                  <form action={approveDesign} className="rounded-2xl border-2 border-cyan bg-cyan/5 p-4">
+                    <input type="hidden" name="id" value={order.id} />
+                    <p className="mb-1 text-base font-bold text-navy">✅ Looks good?</p>
+                    <p className="mb-3 text-sm text-ink/60">The customer gets an email that their design is approved.</p>
+                    <textarea name="note" rows={2} aria-label="Note (only for staff)" placeholder="Note for the history (optional)" className="field mb-3" />
+                    <SubmitButton className="btn-primary w-full py-3 text-base" confirm={`Approve the design for ${order.number}?`}>Approve design</SubmitButton>
+                  </form>
                 )}
-                {canProof && (
-                  <div className="rounded-xl border border-line p-4">
-                    <p className="mb-3 text-sm font-semibold text-navy">Problem with the artwork?</p>
-                    <AdminForm action={flagArtwork} submit="Ask customer for artwork">
+                {toCheck && (
+                  <div className="rounded-2xl border-2 border-magenta/30 bg-magenta/5 p-4">
+                    <p className="mb-1 text-base font-bold text-navy">✏️ Something to fix?</p>
+                    <p className="mb-3 text-sm text-ink/60">Tell the customer what to change. They get it by email and can reply.</p>
+                    <AdminForm action={flagArtwork} submit="Send to customer">
                       <input type="hidden" name="id" value={order.id} />
-                      <textarea name="note" rows={3} required aria-label="What the customer needs to fix" placeholder="e.g. The logo is too low resolution. Please send a larger PNG or a PDF." className="field" />
+                      <textarea name="note" rows={3} required aria-label="What the customer needs to change" placeholder="e.g. The logo is blurry. Please upload a bigger image." className="field" />
                     </AdminForm>
                   </div>
                 )}
                 {order.approval === "artwork_issue" && (
-                  <form action={artworkResolved} className="rounded-xl border border-line p-4">
+                  <form action={artworkResolved} className="rounded-2xl border border-line p-4">
                     <input type="hidden" name="id" value={order.id} />
-                    <p className="mb-3 text-sm font-semibold text-navy">New artwork arrived?</p>
-                    <textarea name="note" rows={2} aria-label="Note" placeholder="Note (optional), e.g. Received new logo by email" className="field mb-3" />
-                    <SubmitButton className="btn-primary">Artwork received · back to review</SubmitButton>
+                    <p className="mb-3 text-base font-bold text-navy">📩 Customer sent the fix?</p>
+                    <textarea name="note" rows={2} aria-label="Note" placeholder="Note (optional), e.g. New logo received by email" className="field mb-3" />
+                    <SubmitButton className="btn-primary w-full">Check the design again</SubmitButton>
                   </form>
                 )}
-                {order.approval !== "approved" && (
-                  <form action={approveForCustomer} className="rounded-xl border border-line p-4">
+                {order.approval === "artwork_issue" && (
+                  <form action={approveDesign} className="rounded-2xl border border-line p-4">
                     <input type="hidden" name="id" value={order.id} />
-                    <p className="mb-3 text-sm font-semibold text-navy">Approved by phone, email or in store?</p>
-                    <textarea name="note" rows={2} aria-label="How it was approved" placeholder="e.g. Approved by phone with Maria, 2:30 pm" className="field mb-3" />
-                    <SubmitButton confirm={`Record that the customer approved ${order.number}? It can then go to production.`}>Mark as approved</SubmitButton>
+                    <p className="mb-3 text-base font-bold text-navy">👍 Fixed it yourself?</p>
+                    <textarea name="note" rows={2} aria-label="Note" placeholder="Note (optional)" className="field mb-3" />
+                    <SubmitButton confirm={`Approve the design for ${order.number}? The customer gets an email.`}>Approve design</SubmitButton>
                   </form>
                 )}
               </div>
@@ -193,13 +254,13 @@ export default async function AdminOrder({ params }: Props) {
           <Card title="Internal notes">
             <AdminForm action={saveOrderNotes} submit="Save notes">
               <input type="hidden" name="id" value={order.id} />
-              <textarea name="notes" rows={4} defaultValue={order.adminNotes} aria-label="Internal notes" placeholder="Only staff see these: proof sent, pickup time, invoice number…" className="field" />
+              <textarea name="notes" rows={4} defaultValue={order.adminNotes} aria-label="Internal notes" placeholder="Only staff see these: pickup time, invoice number…" className="field" />
             </AdminForm>
           </Card>
         </div>
 
         <div className="space-y-6">
-          <Card title="Status">
+          <Card title="Change status by hand">
             <form action={updateOrderStatus} className="flex gap-2">
               <input type="hidden" name="id" value={order.id} />
               <select name="status" defaultValue={order.status} aria-label="Order status" className="field">
@@ -211,8 +272,8 @@ export default async function AdminOrder({ params }: Props) {
             </form>
             <p className="mt-2 text-xs text-ink/50">
               {order.approval === "approved"
-                ? "The customer sees this status in their account."
-                : "The order can go to production once the artwork is approved."}
+                ? "The customer sees this status in their account and gets an email at each step."
+                : "The order can go to printing once the design is approved."}
             </p>
           </Card>
 
@@ -244,6 +305,58 @@ export default async function AdminOrder({ params }: Props) {
             )}
           </Card>
 
+          {order.paymentStatus !== "unpaid" && (() => {
+            const total = order.subtotal + order.tax;
+            const left = Math.round((total - order.refundAmount) * 100) / 100;
+            const requested = order.refundStatus === "requested";
+            return (
+              <Card title="↩️ Refund" className={requested ? "border-2 border-magenta/40" : ""} id="refund">
+                {requested && (
+                  <div className="mb-4 rounded-xl bg-magenta/5 p-3 text-sm">
+                    <p className="font-bold text-magenta">The customer asked for a refund</p>
+                    {order.refundRequestedAt && <p className="text-xs text-ink/50">{dateTime(order.refundRequestedAt)}</p>}
+                    <p className="mt-2 whitespace-pre-wrap">&ldquo;{order.refundReason}&rdquo;</p>
+                  </div>
+                )}
+                {order.refundAmount > 0 && (
+                  <p className="mb-3 text-sm">
+                    Refunded so far: <b className="text-navy">{formatPrice(order.refundAmount)}</b> of {formatPrice(total)}
+                    {order.refundedAt && <span className="text-ink/50"> · last {dateTime(order.refundedAt)}</span>}
+                  </p>
+                )}
+                {order.refundStatus === "declined" && <p className="mb-3 text-sm text-ink/60">The last refund request was declined.</p>}
+                {left > 0 ? (
+                  <>
+                    <AdminForm action={refundOrderAction} submit={requested ? "✅ Refund" : "Refund"} confirm="Refund this order? This can't be undone.">
+                      <input type="hidden" name="id" value={order.id} />
+                      <div>
+                        <label htmlFor="refund-amount" className="label">Amount (up to {formatPrice(left)})</label>
+                        <input id="refund-amount" name="amount" defaultValue={left.toFixed(2)} inputMode="decimal" required className="field" />
+                      </div>
+                      <textarea name="note" rows={2} aria-label="Note to the customer" placeholder="Note to the customer (optional)" className="field" />
+                      <p className="text-xs text-ink/50">
+                        {order.paymentStatus === "paid" && order.stripeSessionId
+                          ? "Goes back to their card through Stripe. The customer gets an email."
+                          : "Not paid by card online: this records the refund; give the money back by cash or check."}
+                      </p>
+                    </AdminForm>
+                    {requested && (
+                      <div className="mt-4 border-t border-line pt-4">
+                        <p className="mb-2 text-sm font-semibold text-navy">✖ Decline the request</p>
+                        <AdminForm action={declineRefundAction} submit="Decline">
+                          <input type="hidden" name="id" value={order.id} />
+                          <textarea name="note" rows={2} required aria-label="Why the refund is declined" placeholder="Why? The customer gets this by email." className="field" />
+                        </AdminForm>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <p className="text-sm font-semibold text-navy">Refunded in full.</p>
+                )}
+              </Card>
+            );
+          })()}
+
           <Card title="Customer">
             <p className="text-sm font-medium">
               <Link href={`/admin/customers/${order.userId}`} className="text-navy hover:underline">{order.customer.name}</Link>
@@ -251,11 +364,21 @@ export default async function AdminOrder({ params }: Props) {
             {order.customer.company && <p className="text-sm text-ink/70">{order.customer.company}</p>}
             <p className="text-sm"><a href={`mailto:${order.customer.email}`} className="underline">{order.customer.email}</a></p>
             {order.customer.phone && <p className="text-sm"><a href={`tel:${order.customer.phone}`} className="underline">{order.customer.phone}</a></p>}
+            {order.billingAddress && (
+              <div className="mt-3 border-t border-line pt-3 text-sm">
+                <p className="text-xs font-semibold uppercase tracking-wider text-ink/50">Billing address</p>
+                {addressLines(order.billingAddress).map((l, i) => <p key={i}>{l}</p>)}
+              </div>
+            )}
           </Card>
 
           <Card title="Fulfillment">
             <p className="text-sm">{order.fulfillment === "pickup" ? "Store pickup" : "Local delivery"}</p>
-            {order.address && <p className="mt-1 whitespace-pre-wrap text-sm text-ink/70">{order.address}</p>}
+            {order.shippingAddress ? (
+              <div className="mt-1 text-sm text-ink/70">{addressLines(order.shippingAddress).map((l, i) => <p key={i}>{l}</p>)}</div>
+            ) : (
+              order.address && <p className="mt-1 whitespace-pre-wrap text-sm text-ink/70">{order.address}</p>
+            )}
           </Card>
         </div>
       </div>

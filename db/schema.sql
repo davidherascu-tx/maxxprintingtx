@@ -92,3 +92,19 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified_at timestamptz;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_sent_at timestamptz;
 -- Accounts made before confirmation existed stay active.
 UPDATE users SET email_verified_at = created_at WHERE email_verified_at IS NULL AND verification_sent_at IS NULL AND created_at < '2026-10-14';
+
+-- Forgot password: when the last reset email went out (at most one every 2 minutes).
+ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_sent_at timestamptz;
+
+-- Addresses: saved on the customer (shipping NULL = same as billing) and copied onto each order.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS billing_address jsonb;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS shipping_address jsonb;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS billing_address jsonb;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS shipping_address jsonb;
+
+-- Refunds: one request per order; refund_amount is the total refunded so far.
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS refund_status text;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS refund_reason text;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS refund_requested_at timestamptz;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS refund_amount numeric NOT NULL DEFAULT 0;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS refunded_at timestamptz;

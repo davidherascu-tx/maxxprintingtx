@@ -3,7 +3,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { formatPrice } from "@/lib/catalog";
 import { designsForUser, findUserById, ordersForUser } from "@/lib/db";
-import { activateCustomer, resendCustomerActivation, resetCustomerPassword, updateCustomer } from "@/lib/admin-actions";
+import { activateCustomer, resendCustomerActivation, resetCustomerPassword, saveCustomerAddresses, updateCustomer } from "@/lib/admin-actions";
+import { AddressBook } from "@/components/address-fields";
 import { requireStaff } from "@/lib/staff-session";
 import { getCatalog } from "@/lib/store";
 import { AdminForm, SubmitButton } from "@/components/admin/admin-form";
@@ -124,6 +125,10 @@ export default async function AdminCustomer({ params }: { params: Promise<{ id: 
               </form>
             </Card>
           )}
+
+          <Card title="🏠 Addresses">
+            <AddressBook action={saveCustomerAddresses} billing={user.billingAddress} shipping={user.shippingAddress} hidden={{ id: user.id }} />
+          </Card>
 
           <Card title="Set a new password">
             <p className="mb-3 text-sm text-ink/60">

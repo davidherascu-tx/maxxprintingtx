@@ -47,10 +47,10 @@ export function Pagination({ page, pages, params, base }: { page: number; pages:
   );
 }
 
-export function Card({ title, children, className = "" }: { title?: string; children: React.ReactNode; className?: string }) {
+export function Card({ title, children, className = "", id }: { title?: string; children: React.ReactNode; className?: string; id?: string }) {
   return (
-    <section className={`rounded-2xl border border-line bg-white p-5 ${className}`}>
-      {title && <h2 className="mb-4 font-semibold text-navy">{title}</h2>}
+    <section id={id} className={`scroll-mt-24 rounded-2xl border border-line bg-white p-5 ${className}`}>
+      {title && <h2 className="mb-4 text-lg font-bold text-navy">{title}</h2>}
       {children}
     </section>
   );

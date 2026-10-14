@@ -37,8 +37,8 @@ function sign(value: string) {
   return createHmac("sha256", secret()).update(value).digest("base64url");
 }
 
-/** "verify": the link in an account activation email. */
-type TokenKind = "customer" | "staff" | "verify";
+/** "verify": the link in an account activation email; "reset": a forgot-password link. */
+type TokenKind = "customer" | "staff" | "verify" | "reset";
 
 /** A signed, expiring token for a customer or staff session. */
 export function encodeToken(kind: TokenKind, id: string, maxAgeSeconds: number) {
@@ -88,7 +88,16 @@ export const getCurrentUser = cache(async () => {
   // Staff reset this password after the session was created: sign it out.
   if (user.passwordChangedAt && session.iat < Date.parse(user.passwordChangedAt)) return null;
   if (!user.emailVerifiedAt && activationRequired()) return null;
-  return { id: user.id, name: user.name, email: user.email, phone: user.phone, company: user.company, createdAt: user.createdAt };
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    phone: user.phone,
+    company: user.company,
+    billingAddress: user.billingAddress,
+    shippingAddress: user.shippingAddress,
+    createdAt: user.createdAt,
+  };
 });
 
 export type CurrentUser = NonNullable<Awaited<ReturnType<typeof getCurrentUser>>>;

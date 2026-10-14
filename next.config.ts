@@ -4,10 +4,6 @@ import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
 initOpenNextCloudflareForDev();
 
 const nextConfig: NextConfig = {
-  experimental: {
-    // Staff attach proof images (up to 8 MB) through a server action; the default limit is 1 MB.
-    serverActions: { bodySizeLimit: "10mb" },
-  },
   // Old category pages, kept working after the categories were merged
   async redirects() {
     return [

@@ -1,7 +1,8 @@
 import "server-only";
 import { neon } from "@neondatabase/serverless";
 import { randomUUID } from "node:crypto";
-import { gangSlugs, type DesignSource } from "./design-config";
+import { gangSlugs, needsDesignCheck, type DesignSource } from "./design-config";
+import { asAddress, type Address } from "./address";
 
 // Postgres store (Neon). Needs DATABASE_URL (the Neon pooled connection string).
 
@@ -16,6 +17,9 @@ export type User = {
   passwordChangedAt?: string;
   /** Set when the customer clicks the link in the activation email. Unconfirmed accounts can't sign in. */
   emailVerifiedAt?: string;
+  billingAddress?: Address;
+  /** Undefined = same as the billing address. */
+  shippingAddress?: Address;
   createdAt: string;
 };
 
@@ -40,9 +44,11 @@ export type OrderItem = {
 };
 
 /**
- * Artwork approval, for orders that have been placed:
- * review (staff check the artwork) → proof_sent (waiting for the customer) → approved,
- * or artwork_issue (staff need something from the customer) / changes_requested (customer asked for changes).
+ * Design approval, done by the shop, only for orders with a Design Studio / DTF design:
+ * review (staff check the design) → approved, or artwork_issue (staff asked the customer to
+ * change something; back to review when it's fixed). Orders without a design start approved.
+ * proof_sent and changes_requested are from the earlier customer-proof flow; old orders in
+ * those steps are treated like review.
  */
 export type Approval = "review" | "artwork_issue" | "proof_sent" | "changes_requested" | "approved";
 export const APPROVALS: Approval[] = ["review", "artwork_issue", "proof_sent", "changes_requested", "approved"];
@@ -65,6 +71,16 @@ export type Order = {
   adminNotes: string;
   approval: Approval;
   paidAt?: string;
+  /** Copies of the addresses at the time of the order (older orders may not have them). */
+  billingAddress?: Address;
+  shippingAddress?: Address;
+  /** requested (customer asked) → refunded / partial, or declined. Undefined = never asked or refunded. */
+  refundStatus?: "requested" | "declined" | "refunded" | "partial";
+  refundReason?: string;
+  refundRequestedAt?: string;
+  /** Total refunded so far (dollars). */
+  refundAmount: number;
+  refundedAt?: string;
   createdAt: string;
 };
 
@@ -103,6 +119,8 @@ const toUser = (r: Row): User => ({
   company: r.company ?? undefined,
   passwordChangedAt: r.password_changed_at ? iso(r.password_changed_at) : undefined,
   emailVerifiedAt: r.email_verified_at ? iso(r.email_verified_at) : undefined,
+  billingAddress: asAddress(r.billing_address),
+  shippingAddress: asAddress(r.shipping_address),
   createdAt: iso(r.created_at),
 });
 
@@ -130,7 +148,14 @@ const toOrder = (r: Row): Order => ({
   status: r.status,
   adminNotes: r.admin_notes ?? "",
   approval: APPROVALS.includes(r.approval) ? r.approval : "review",
+  billingAddress: asAddress(r.billing_address),
+  shippingAddress: asAddress(r.shipping_address),
   paidAt: r.paid_at ? iso(r.paid_at) : undefined,
+  refundStatus: r.refund_status ?? undefined,
+  refundReason: r.refund_reason ?? undefined,
+  refundRequestedAt: r.refund_requested_at ? iso(r.refund_requested_at) : undefined,
+  refundAmount: Number(r.refund_amount ?? 0),
+  refundedAt: r.refunded_at ? iso(r.refunded_at) : undefined,
   createdAt: iso(r.created_at),
 });
 
@@ -148,7 +173,7 @@ export async function findUserById(id: string) {
 }
 
 /** Returns null if the email is already registered. */
-export async function createUser(input: Omit<User, "id" | "createdAt" | "passwordChangedAt" | "emailVerifiedAt"> & { verified: boolean }) {
+export async function createUser(input: Omit<User, "id" | "createdAt" | "passwordChangedAt" | "emailVerifiedAt" | "billingAddress" | "shippingAddress"> & { verified: boolean }) {
   const [row] = await sql`
     INSERT INTO users (id, name, email, password_hash, phone, company, email_verified_at)
     VALUES (${randomUUID()}, ${input.name}, ${input.email}, ${input.passwordHash}, ${input.phone ?? null}, ${input.company ?? null},
@@ -197,13 +222,16 @@ export async function setOrderStatus(id: string, status: Order["status"]) {
 
 /** Creates an order awaiting payment. */
 export async function createOrder(
-  input: Omit<Order, "id" | "number" | "status" | "createdAt" | "paymentStatus" | "stripeSessionId" | "adminNotes" | "paidAt" | "approval">,
+  input: Omit<Order, "id" | "number" | "status" | "createdAt" | "paymentStatus" | "stripeSessionId" | "adminNotes" | "paidAt" | "approval" | "refundStatus" | "refundReason" | "refundRequestedAt" | "refundAmount" | "refundedAt">,
 ) {
   const [row] = await sql`
-    INSERT INTO orders (id, number, user_id, items, subtotal, tax, notes, fulfillment, address, payment_status)
+    INSERT INTO orders (id, number, user_id, items, subtotal, tax, notes, fulfillment, address, payment_status, approval, billing_address, shipping_address)
     VALUES (
       ${randomUUID()}, 'MX-' || nextval('order_number_seq'), ${input.userId}, ${JSON.stringify(input.items)}::text::jsonb,
-      ${input.subtotal}, ${input.tax}, ${input.notes}, ${input.fulfillment}, ${input.address ?? null}, 'unpaid'
+      ${input.subtotal}, ${input.tax}, ${input.notes}, ${input.fulfillment}, ${input.address ?? null}, 'unpaid',
+      ${needsDesignCheck(input.items) ? "review" : "approved"},
+      ${input.billingAddress ? JSON.stringify(input.billingAddress) : null}::text::jsonb,
+      ${input.shippingAddress ? JSON.stringify(input.shippingAddress) : null}::text::jsonb
     )
     RETURNING *`;
   return toOrder(row);
@@ -337,10 +365,10 @@ export async function saveSettings(value: unknown) {
 export async function dashboardStats() {
   const [totals] = await sql`
     SELECT
-      COALESCE(sum(subtotal + tax) FILTER (WHERE payment_status = 'paid'
+      COALESCE(sum(subtotal + tax - refund_amount) FILTER (WHERE payment_status = 'paid'
         AND COALESCE(paid_at, created_at) >= (date_trunc('day', now() AT TIME ZONE 'America/Chicago') AT TIME ZONE 'America/Chicago')), 0) AS today,
-      COALESCE(sum(subtotal + tax) FILTER (WHERE payment_status = 'paid' AND COALESCE(paid_at, created_at) >= now() - interval '7 days'), 0) AS week,
-      COALESCE(sum(subtotal + tax) FILTER (WHERE payment_status = 'paid' AND COALESCE(paid_at, created_at) >= now() - interval '30 days'), 0) AS month,
+      COALESCE(sum(subtotal + tax - refund_amount) FILTER (WHERE payment_status = 'paid' AND COALESCE(paid_at, created_at) >= now() - interval '7 days'), 0) AS week,
+      COALESCE(sum(subtotal + tax - refund_amount) FILTER (WHERE payment_status = 'paid' AND COALESCE(paid_at, created_at) >= now() - interval '30 days'), 0) AS month,
       count(*) FILTER (WHERE payment_status = 'paid' AND COALESCE(paid_at, created_at) >= now() - interval '30 days') AS month_orders,
       count(*) FILTER (WHERE payment_status <> 'unpaid' AND status <> 'Completed') AS open_orders,
       count(*) FILTER (WHERE payment_status = 'unpaid') AS awaiting_payment,
@@ -349,13 +377,24 @@ export async function dashboardStats() {
   const byApproval = await sql`
     SELECT approval, count(*) AS n FROM orders
     WHERE payment_status <> 'unpaid' AND status <> 'Completed' GROUP BY approval`;
+  /** The admin home page's to-do list: placed, open orders per next step. */
+  const [todo] = await sql`
+    SELECT
+      count(*) FILTER (WHERE approval IN ('review', 'proof_sent', 'changes_requested')) AS to_check,
+      0 AS to_fix,
+      count(*) FILTER (WHERE approval = 'artwork_issue') AS waiting,
+      count(*) FILTER (WHERE approval = 'approved' AND status = 'Received') AS to_print,
+      count(*) FILTER (WHERE approval = 'approved' AND status = 'In production') AS printing,
+      count(*) FILTER (WHERE status = 'Ready') AS ready
+    FROM orders WHERE payment_status <> 'unpaid' AND status <> 'Completed' AND COALESCE(refund_status, '') <> 'refunded'`;
+  const [refunds] = await sql`SELECT count(*) AS n FROM orders WHERE refund_status = 'requested'`;
   const byStatus = await sql`
     SELECT status, count(*) AS n FROM orders WHERE payment_status <> 'unpaid' GROUP BY status`;
   const [customers] = await sql`
     SELECT count(*) AS total, count(*) FILTER (WHERE created_at >= now() - interval '30 days') AS new_30 FROM users`;
   const daily = await sql`
     SELECT to_char(date_trunc('day', COALESCE(paid_at, created_at) AT TIME ZONE 'America/Chicago'), 'YYYY-MM-DD') AS day,
-           sum(subtotal + tax) AS revenue, count(*) AS orders
+           sum(subtotal + tax - refund_amount) AS revenue, count(*) AS orders
     FROM orders
     WHERE payment_status = 'paid' AND COALESCE(paid_at, created_at) >= now() - interval '30 days'
     GROUP BY 1 ORDER BY 1`;
@@ -373,6 +412,15 @@ export async function dashboardStats() {
     awaitingPayment: Number(totals.awaiting_payment),
     invoiced: Number(totals.invoiced),
     byStatus: Object.fromEntries(byStatus.map((r) => [r.status, Number(r.n)])) as Record<string, number>,
+    todo: {
+      toCheck: Number(todo.to_check),
+      toFix: Number(todo.to_fix),
+      waiting: Number(todo.waiting),
+      toPrint: Number(todo.to_print),
+      printing: Number(todo.printing),
+      ready: Number(todo.ready),
+      refunds: Number(refunds.n),
+    },
     /** Open (placed, not completed) orders per approval step. */
     byApproval: Object.fromEntries(byApproval.map((r) => [r.approval, Number(r.n)])) as Partial<Record<Approval, number>>,
     customers: { total: Number(customers.total), new30: Number(customers.new_30) },
@@ -392,20 +440,26 @@ const toAdminOrder = (r: Row): AdminOrder => ({
 
 /** Which orders a list shows: "placed" (paid or invoiced, the default), one payment status, or everything. */
 export type PaymentFilter = "placed" | "paid" | "invoice" | "unpaid" | "all";
-export const PAYMENT_FILTERS: PaymentFilter[] = ["placed", "paid", "invoice", "unpaid", "all"];
 
 export async function searchOrders(opts: {
   q?: string;
   status?: string;
   payment?: PaymentFilter;
-  approval?: string;
+  /** One approval step, or several (any of them). */
+  approval?: string | string[];
+  /** Leave out completed orders. */
+  open?: boolean;
   /** Orders with at least one item of this kind. */
   source?: DesignSource;
+  refund?: "requested";
   page?: number;
 }) {
   const q = opts.q?.trim() ? likeTerm(opts.q.trim()) : null;
   const status = ORDER_STATUSES.find((s) => s === opts.status) ?? null;
-  const approval = APPROVALS.find((a) => a === opts.approval) ?? null;
+  const wanted = ([] as string[]).concat(opts.approval ?? []).filter((a): a is Approval => APPROVALS.includes(a as Approval));
+  const approvals = wanted.length ? wanted : null;
+  const open = !!opts.open;
+  const refund = opts.refund ?? null;
   const source = opts.source ?? null;
   const payment = opts.payment ?? "placed";
   const page = Math.max(1, Math.floor(opts.page ?? 1));
@@ -416,7 +470,9 @@ export async function searchOrders(opts: {
     WHERE (${q}::text IS NULL OR o.number ILIKE ${q} OR u.name ILIKE ${q} OR u.email ILIKE ${q} OR COALESCE(u.company, '') ILIKE ${q})
       AND (${status}::text IS NULL OR o.status = ${status})
       AND (${payment}::text = 'all' OR (${payment}::text = 'placed' AND o.payment_status <> 'unpaid') OR o.payment_status = ${payment})
-      AND (${approval}::text IS NULL OR o.approval = ${approval})
+      AND (${approvals}::text[] IS NULL OR o.approval = ANY(${approvals}::text[]))
+      AND (NOT ${open}::boolean OR (o.status <> 'Completed' AND COALESCE(o.refund_status, '') <> 'refunded'))
+      AND (${refund}::text IS NULL OR o.refund_status = ${refund})
       AND (${source}::text IS NULL OR EXISTS (
         SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(o.items) = 'array' THEN o.items ELSE '[]'::jsonb END) AS i
         WHERE CASE ${source}::text
@@ -500,7 +556,9 @@ export async function adminUpdateUser(id: string, patch: Pick<User, "name" | "em
 /** Set a new password hash. Sessions created before now stop working. */
 export async function setUserPassword(id: string, passwordHash: string) {
   if (!UUID.test(id)) return;
-  await sql`UPDATE users SET password_hash = ${passwordHash}, password_changed_at = now() WHERE id = ${id}`;
+  // The app's clock, not the database's: sessions are compared against it, and a session made right
+  // after this (e.g. after a reset) must count as newer even if the clocks differ slightly.
+  await sql`UPDATE users SET password_hash = ${passwordHash}, password_changed_at = ${new Date().toISOString()} WHERE id = ${id}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -553,7 +611,8 @@ export async function createStaff(input: { name: string; email: string; password
 /** New password; that staff member's existing sessions stop working. */
 export async function setStaffPassword(id: string, passwordHash: string) {
   if (!UUID.test(id)) return;
-  await sql`UPDATE staff SET password_hash = ${passwordHash}, password_changed_at = now() WHERE id = ${id}`;
+  // App clock, as for customers (see setUserPassword).
+  await sql`UPDATE staff SET password_hash = ${passwordHash}, password_changed_at = ${new Date().toISOString()} WHERE id = ${id}`;
 }
 
 export async function touchStaffLogin(id: string) {
@@ -577,7 +636,10 @@ export type OrderEventKind =
   | "artwork_ok" // staff: artwork issue sorted, back to review
   | "approved_by_staff" // staff recorded an approval given another way (phone, email, in store)
   | "approved" // customer approved the proof
-  | "changes_requested"; // customer asked for changes
+  | "changes_requested" // customer asked for changes
+  | "refund_requested" // customer asked for a refund
+  | "refunded" // staff refunded (some or all of) the order
+  | "refund_declined"; // staff declined the refund request
 
 export type OrderEvent = {
   id: string;
@@ -660,5 +722,79 @@ export async function claimVerificationEmail(id: string) {
     WHERE id = ${id} AND email_verified_at IS NULL
       AND (verification_sent_at IS NULL OR verification_sent_at < now() - interval '2 minutes')
     RETURNING id`;
+  return rows.length > 0;
+}
+
+/** Note that a password reset email is going out; false if one went out in the last two minutes. */
+export async function claimResetEmail(id: string) {
+  if (!UUID.test(id)) return false;
+  const rows = await sql`
+    UPDATE users SET reset_sent_at = now()
+    WHERE id = ${id} AND (reset_sent_at IS NULL OR reset_sent_at < now() - interval '2 minutes')
+    RETURNING id`;
+  return rows.length > 0;
+}
+
+/** Orders waiting for staff (to check, to fix, to print, printing), for the badge in the admin menu. */
+export async function countStaffTodo() {
+  const [r] = await sql`
+    SELECT count(*) AS n FROM orders
+    WHERE refund_status = 'requested'
+      OR (payment_status <> 'unpaid' AND status <> 'Completed' AND COALESCE(refund_status, '') <> 'refunded'
+        AND (approval IN ('review', 'proof_sent', 'changes_requested') OR (approval = 'approved' AND status IN ('Received', 'In production'))))`;
+  return Number(r.n);
+}
+
+/** Save a customer's addresses. `shipping` null = same as billing. */
+export async function saveUserAddresses(id: string, billing: Address | null, shipping: Address | null) {
+  if (!UUID.test(id)) return;
+  await sql`
+    UPDATE users SET
+      billing_address = ${billing ? JSON.stringify(billing) : null}::text::jsonb,
+      shipping_address = ${shipping ? JSON.stringify(shipping) : null}::text::jsonb
+    WHERE id = ${id}`;
+}
+
+// ---------------------------------------------------------------------------
+// Refunds
+// ---------------------------------------------------------------------------
+
+export async function addOrderEvent(orderId: string, event: Omit<OrderEvent, "id" | "orderId" | "at">) {
+  await sql`
+    INSERT INTO order_events (id, order_id, actor, actor_name, kind, note, image)
+    VALUES (${randomUUID()}, ${orderId}, ${event.actor}, ${event.actorName}, ${event.kind}, ${event.note}, ${event.image ?? null})`;
+}
+
+/** A customer asks for a refund. Only for their own placed order, and only if nothing is pending or fully refunded. */
+export async function requestRefund(orderId: string, userId: string, reason: string) {
+  if (!UUID.test(orderId)) return false;
+  const rows = await sql`
+    UPDATE orders SET refund_status = 'requested', refund_reason = ${reason}, refund_requested_at = now()
+    WHERE id = ${orderId} AND user_id = ${userId} AND payment_status <> 'unpaid'
+      AND (refund_status IS NULL OR refund_status IN ('declined', 'partial'))
+      AND refund_amount < subtotal + tax
+    RETURNING id`;
+  return rows.length > 0;
+}
+
+/**
+ * Record money given back. Refuses more than is left to refund. Returns the new refund status, or
+ * null if nothing changed.
+ */
+export async function recordRefund(orderId: string, amount: number) {
+  if (!UUID.test(orderId) || !(amount > 0)) return null;
+  const [row] = await sql`
+    UPDATE orders SET
+      refund_amount = refund_amount + ${amount},
+      refund_status = CASE WHEN refund_amount + ${amount} >= subtotal + tax - 0.005 THEN 'refunded' ELSE 'partial' END,
+      refunded_at = now()
+    WHERE id = ${orderId} AND payment_status <> 'unpaid' AND refund_amount + ${amount} <= subtotal + tax + 0.005
+    RETURNING refund_status`;
+  return (row?.refund_status as "refunded" | "partial" | undefined) ?? null;
+}
+
+export async function declineRefund(orderId: string) {
+  if (!UUID.test(orderId)) return false;
+  const rows = await sql`UPDATE orders SET refund_status = 'declined' WHERE id = ${orderId} AND refund_status = 'requested' RETURNING id`;
   return rows.length > 0;
 }

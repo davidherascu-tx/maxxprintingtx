@@ -104,7 +104,7 @@ export default async function ProductPage({ params }: { params: Promise<{ slug: 
           )}
           {!requiresDesign(product.slug) && (
           <p className="mt-6 rounded-xl bg-mist p-4 text-sm text-ink/70">
-            After you order, our team will reach out to collect your artwork and send a proof before printing.
+            After you order, our team will reach out to collect your artwork before printing.
             Bulk pricing available — <Link href="/contact" className="font-medium text-navy underline">contact us</Link>.
           </p>
           )}

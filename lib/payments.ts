@@ -96,3 +96,21 @@ export async function expireSession(sessionId: string) {
   if (session.status === "open") await s.checkout.sessions.expire(sessionId);
   return true;
 }
+
+/**
+ * Give money back for an order paid by card through Stripe Checkout. Returns the Stripe refund id,
+ * or null if the order wasn't paid through Stripe (cash, check or invoice: refund those yourself).
+ */
+export async function refundPayment(order: Order, amountCents: number) {
+  if (!order.stripeSessionId || !paymentsConfigured()) return null;
+  const s = stripe();
+  const session = await s.checkout.sessions.retrieve(order.stripeSessionId);
+  const paymentIntent = typeof session.payment_intent === "string" ? session.payment_intent : session.payment_intent?.id;
+  if (!paymentIntent) return null;
+  const refund = await s.refunds.create({
+    payment_intent: paymentIntent,
+    amount: amountCents,
+    metadata: { order_id: order.id, order_number: order.number },
+  });
+  return refund.id;
+}

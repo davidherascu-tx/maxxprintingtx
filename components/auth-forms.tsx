@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useActionState, useState } from "react";
-import { resendActivation, signIn, signUp, updateProfile } from "@/lib/actions";
+import { changePassword, requestPasswordReset, resendActivation, resetPassword, signIn, signUp, updateProfile } from "@/lib/actions";
 
 function ErrorNote({ message }: { message?: string }) {
   if (!message) return null;
@@ -19,7 +19,10 @@ export function SignInForm({ next }: { next: string }) {
         <input id="email" name="email" type="email" autoComplete="email" required className="field" />
       </div>
       <div>
-        <label htmlFor="password" className="label">Password</label>
+        <div className="flex items-baseline justify-between">
+          <label htmlFor="password" className="label">Password</label>
+          <Link href="/forgot-password" className="text-sm font-medium text-navy hover:underline">Forgot password?</Link>
+        </div>
         <input id="password" name="password" type="password" autoComplete="current-password" required className="field" />
       </div>
       <ErrorNote message={state?.error} />
@@ -120,31 +123,109 @@ export function SignUpForm({ next }: { next: string }) {
   );
 }
 
+/** A form row for the account Profile tab: label on the left, field on the right (stacked on phones). */
+function Row({ id, label, hint, children }: { id: string; label: string; hint?: string; children: React.ReactNode }) {
+  return (
+    <div className="grid gap-1.5 sm:grid-cols-[8.5rem_1fr] sm:items-center sm:gap-4">
+      <label htmlFor={id} className="text-sm font-medium text-ink/80">{label}</label>
+      <div>
+        {children}
+        {hint && <p className="mt-1 text-xs text-ink/50">{hint}</p>}
+      </div>
+    </div>
+  );
+}
+
 export function ProfileForm({ user }: { user: { name: string; email: string; phone?: string; company?: string } }) {
   const [state, action, pending] = useActionState(updateProfile, undefined);
   return (
     <form action={action} className="space-y-4">
-      <div>
-        <label htmlFor="name" className="label">Full name</label>
-        <input id="name" name="name" defaultValue={user.name} required className="field" />
+      <Row id="name" label="Full name">
+        <input id="name" name="name" defaultValue={user.name} autoComplete="name" required className="field" />
+      </Row>
+      <Row id="email" label="Email" hint="Used to sign in. Call us to change it.">
+        <input id="email" value={user.email} disabled className="field bg-mist text-ink/60" />
+      </Row>
+      <Row id="phone" label="Phone">
+        <input id="phone" name="phone" type="tel" defaultValue={user.phone} autoComplete="tel" className="field" />
+      </Row>
+      <Row id="company" label="Company">
+        <input id="company" name="company" defaultValue={user.company} autoComplete="organization" className="field" />
+      </Row>
+      <ErrorNote message={state?.error} />
+      {state?.ok && <p className="rounded-lg bg-cyan/10 px-3 py-2 text-sm text-navy" role="status">{state.ok}</p>}
+      <div className="flex justify-end">
+        <button type="submit" disabled={pending} className="btn-primary px-6 py-2.5">
+          {pending ? "Saving…" : "Save"}
+        </button>
       </div>
+    </form>
+  );
+}
+
+export function ForgotPasswordForm() {
+  const [state, action, pending] = useActionState(requestPasswordReset, undefined);
+  if (state?.ok) return <CheckYourEmail message={state.ok} />;
+  return (
+    <form action={action} className="space-y-4">
       <div>
         <label htmlFor="email" className="label">Email</label>
-        <input id="email" value={user.email} disabled className="field bg-mist text-ink/60" />
-      </div>
-      <div>
-        <label htmlFor="phone" className="label">Phone</label>
-        <input id="phone" name="phone" type="tel" defaultValue={user.phone} className="field" />
-      </div>
-      <div>
-        <label htmlFor="company" className="label">Company</label>
-        <input id="company" name="company" defaultValue={user.company} className="field" />
+        <input id="email" name="email" type="email" autoComplete="email" required className="field" />
       </div>
       <ErrorNote message={state?.error} />
-      {state?.ok && <p className="text-sm text-navy" role="status">{state.ok}</p>}
-      <button type="submit" disabled={pending} className="btn-outline w-full">
-        {pending ? "Saving…" : "Save profile"}
+      <button type="submit" disabled={pending} className="btn-primary w-full">
+        {pending ? "Sending…" : "Email me a reset link"}
       </button>
+      <p className="text-center text-sm text-ink/60">
+        Remembered it? <Link href="/signin" className="font-semibold text-navy hover:underline">Sign in</Link>
+      </p>
+    </form>
+  );
+}
+
+export function ResetPasswordForm({ token }: { token: string }) {
+  const [state, action, pending] = useActionState(resetPassword, undefined);
+  return (
+    <form action={action} className="space-y-4">
+      <input type="hidden" name="token" value={token} />
+      <div>
+        <label htmlFor="password" className="label">New password</label>
+        <input id="password" name="password" type="password" autoComplete="new-password" minLength={8} required className="field" />
+        <p className="mt-1 text-xs text-ink/50">At least 8 characters.</p>
+      </div>
+      <div>
+        <label htmlFor="confirm" className="label">Repeat new password</label>
+        <input id="confirm" name="confirm" type="password" autoComplete="new-password" minLength={8} required className="field" />
+      </div>
+      <ErrorNote message={state?.error} />
+      <button type="submit" disabled={pending} className="btn-primary w-full">
+        {pending ? "Saving…" : "Save new password"}
+      </button>
+    </form>
+  );
+}
+
+export function ChangePasswordForm() {
+  const [state, action, pending] = useActionState(changePassword, undefined);
+  return (
+    <form action={action} className="space-y-4">
+      <Row id="current-password" label="Current">
+        <input id="current-password" name="current" type="password" autoComplete="current-password" required className="field" />
+      </Row>
+      <Row id="new-password" label="New" hint="At least 8 characters.">
+        <input id="new-password" name="password" type="password" autoComplete="new-password" minLength={8} required className="field" />
+      </Row>
+      <Row id="confirm-password" label="Repeat new">
+        <input id="confirm-password" name="confirm" type="password" autoComplete="new-password" minLength={8} required className="field" />
+      </Row>
+      <ErrorNote message={state?.error} />
+      {state?.ok && <p className="rounded-lg bg-cyan/10 px-3 py-2 text-sm text-navy" role="status">{state.ok}</p>}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <Link href="/forgot-password" className="text-xs font-medium text-navy hover:underline">Forgot your current password?</Link>
+        <button type="submit" disabled={pending} className="btn-primary px-6 py-2.5">
+          {pending ? "Saving…" : "Change"}
+        </button>
+      </div>
     </form>
   );
 }

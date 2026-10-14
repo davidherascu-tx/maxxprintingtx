@@ -92,7 +92,7 @@ export default async function Home() {
       <section className="bg-mist">
         <div className="container-x grid gap-6 py-14 sm:grid-cols-3">
           {[
-            { color: "bg-cyan", title: "Free artwork review", text: "We check every file and send a proof before anything prints." },
+            { color: "bg-cyan", title: "Free design check", text: "Our team checks every Design Studio design before anything prints." },
             { color: "bg-magenta", title: "Fast local turnaround", text: "Pick up in Houston or have it delivered to your door." },
             { color: "bg-yellow", title: "One-stop shop", text: "Signs, apparel, stickers and displays — all under one roof." },
           ].map((f) => (

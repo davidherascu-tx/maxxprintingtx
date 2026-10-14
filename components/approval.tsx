@@ -4,27 +4,27 @@ import type { DesignSource } from "@/lib/design-config";
 const tone: Record<Approval, string> = {
   review: "bg-yellow/30 text-navy",
   artwork_issue: "bg-magenta/15 text-magenta",
-  proof_sent: "bg-cyan/15 text-navy",
-  changes_requested: "bg-magenta/15 text-magenta",
+  proof_sent: "bg-yellow/30 text-navy",
+  changes_requested: "bg-yellow/30 text-navy",
   approved: "bg-navy text-white",
 };
 
 /** What each approval step means to staff. */
 export const staffApprovalLabel: Record<Approval, string> = {
-  review: "Needs review",
-  artwork_issue: "Waiting on customer artwork",
-  proof_sent: "Proof sent · waiting for customer",
-  changes_requested: "Customer requested changes",
-  approved: "Approved",
+  review: "Design to check",
+  artwork_issue: "Waiting on customer",
+  proof_sent: "Design to check",
+  changes_requested: "Design to check",
+  approved: "Design approved",
 };
 
 /** The same steps, as the customer sees them. */
 export const customerApprovalLabel: Record<Approval, string> = {
-  review: "Checking your artwork",
-  artwork_issue: "Action needed: artwork",
-  proof_sent: "Proof ready · please review",
-  changes_requested: "Updating your proof",
-  approved: "Proof approved",
+  review: "We're checking your design",
+  artwork_issue: "Action needed: your design",
+  proof_sent: "We're checking your design",
+  changes_requested: "We're checking your design",
+  approved: "Design approved",
 };
 
 export function ApprovalBadge({ approval, customer }: { approval: Approval; customer?: boolean }) {
@@ -48,11 +48,14 @@ export function SourceBadge({ source }: { source: DesignSource }) {
 
 const eventText: Record<OrderEvent["kind"], string> = {
   proof_sent: "sent a proof",
-  artwork_issue: "asked for new artwork",
-  artwork_ok: "marked the artwork as received",
-  approved_by_staff: "recorded the customer's approval",
+  artwork_issue: "asked the customer to change the design",
+  artwork_ok: "marked the new design as received",
+  approved_by_staff: "approved the design",
   approved: "approved the proof",
   changes_requested: "requested changes",
+  refund_requested: "asked for a refund",
+  refunded: "refunded",
+  refund_declined: "declined the refund request",
 };
 
 const when = (iso: string) =>

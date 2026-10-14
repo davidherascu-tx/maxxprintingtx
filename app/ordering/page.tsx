@@ -5,7 +5,7 @@ import { taxLabel } from "@/lib/tax";
 
 export const metadata: Metadata = {
   title: "Ordering & delivery",
-  description: "How ordering works: payment, proofs, store pickup and delivery costs.",
+  description: "How ordering works: payment, design check, store pickup and delivery costs.",
 };
 
 const steps = [
@@ -15,8 +15,8 @@ const steps = [
     color: "bg-cyan",
   },
   {
-    title: "Approve your proof",
-    text: "We review your artwork and email you a proof. We can make changes until you approve it, and nothing prints before that.",
+    title: "We check your design",
+    text: "If you made your design in our Design Studio, our team checks it before printing. If something needs a change, we email you.",
     color: "bg-magenta",
   },
   {
@@ -26,7 +26,7 @@ const steps = [
   },
   {
     title: "We print",
-    text: "Production starts once your proof is approved. Pick up in store or get it delivered.",
+    text: "We email you when your order is being printed and again when it's ready. Pick up in store or get it delivered.",
     color: "bg-navy",
   },
 ];
@@ -34,7 +34,7 @@ const steps = [
 const faqTemplate = [
   {
     q: "When do I pay?",
-    a: "At checkout, by credit or debit card. We send a proof afterwards, and nothing prints until you approve it.",
+    a: "At checkout, by credit or debit card. After that we email you at every step: design approved, printing, ready and done.",
   },
   {
     q: "Is my card information safe?",
@@ -49,8 +49,12 @@ const faqTemplate = [
     a: "No. Prices on the website don't include tax. Sales tax (TAX%) is added at checkout.",
   },
   {
+    q: "Can I return my order or get a refund?",
+    a: "POLICY Ask in your account: open the order and press \"Request a refund\".",
+  },
+  {
     q: "Can I change my order after placing it?",
-    a: "Yes. Contact us before you approve your proof and we'll update the order.",
+    a: "Yes. Contact us before we start printing and we'll update the order.",
   },
   {
     q: "Do you ship outside the Houston area?",
@@ -59,9 +63,9 @@ const faqTemplate = [
 ];
 
 export default async function OrderingPage() {
-  const { site, taxRate } = await getSettings();
+  const { site, taxRate, returnPolicy } = await getSettings();
   const tax = taxLabel(taxRate);
-  const faqs = faqTemplate.map((f) => ({ ...f, a: f.a.replace("TAX%", tax) }));
+  const faqs = faqTemplate.map((f) => ({ ...f, a: f.a.replace("TAX%", tax).replace("POLICY", returnPolicy) }));
   return (
     <div className="container-x py-12">
       <h1 className="font-display text-4xl text-navy">Ordering & delivery</h1>

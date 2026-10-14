@@ -7,11 +7,14 @@ import { colorOf, formatPrice } from "@/lib/catalog";
 import { calcTax, taxLabel } from "@/lib/tax";
 import { linePrice, useCart } from "./cart";
 import { useCatalog, useStoreSettings } from "./store";
+import { AddressFields } from "./address-fields";
+import type { Address } from "@/lib/address";
 
-export function CheckoutForm() {
+export function CheckoutForm({ billing, shipping, name, phone, company }: { billing?: Address; shipping?: Address; name: string; phone?: string; company?: string }) {
+  const [shipSame, setShipSame] = useState(!shipping);
   const { lines, ready, subtotal } = useCart();
   const catalog = useCatalog();
-  const { taxRate, pickup, delivery } = useStoreSettings();
+  const { taxRate, pickup, delivery, returnPolicy } = useStoreSettings();
   const options = (
     [
       ["pickup", "Store pickup", pickup],
@@ -67,11 +70,25 @@ export function CheckoutForm() {
             ))}
           </div>
           {fulfillment === "delivery" && (
-            <div className="mt-4">
-              <label htmlFor="address" className="label">Delivery address</label>
-              <textarea id="address" name="address" rows={2} required className="field" />
+            <div className="mt-5 border-t border-line pt-4">
+              <p className="mb-2 font-medium text-navy">Delivery address</p>
+              <label className="mb-3 flex items-center gap-2 text-sm">
+                <input type="checkbox" name="shippingSame" checked={shipSame} onChange={(e) => setShipSame(e.target.checked)} className="h-4 w-4 accent-navy" />
+                Same as billing address
+              </label>
+              {!shipSame && <AddressFields prefix="shipping" value={shipping} idPrefix="checkout-ship" required />}
             </div>
           )}
+        </fieldset>
+
+        <fieldset className="rounded-2xl border border-line p-6">
+          <legend className="px-2 font-semibold text-navy">Billing address</legend>
+          <p className="mb-3 text-sm text-ink/60">This goes on your invoice.</p>
+          <AddressFields prefix="billing" value={billing ?? { name, company, phone, line1: "", city: "", state: "TX", zip: "" }} idPrefix="checkout-bill" required />
+          <label className="mt-4 flex items-center gap-2 text-sm">
+            <input type="checkbox" name="saveAddresses" defaultChecked className="h-4 w-4 accent-navy" />
+            Save these addresses to my account
+          </label>
         </fieldset>
 
         <fieldset className="rounded-2xl border border-line p-6">
@@ -80,7 +97,7 @@ export function CheckoutForm() {
             Tell us about your design: text, colors, placement, deadlines…
           </label>
           <textarea id="notes" name="notes" rows={5} className="field" placeholder="e.g. Logo on front left chest, names on back. Need by Friday." />
-          <p className="mt-2 text-sm text-ink/50">We&apos;ll email you to collect artwork files and send a proof.</p>
+          <p className="mt-2 text-sm text-ink/50">No design yet? We&apos;ll email you to collect your artwork files.</p>
         </fieldset>
       </div>
 
@@ -124,9 +141,13 @@ export function CheckoutForm() {
           <span>{formatPrice(subtotal + tax)}</span>
         </div>
         <p className="mt-2 text-xs text-ink/50">
-          You&apos;ll pay securely by card on the next page (powered by Stripe). We send a proof before anything prints.{" "}
+          You&apos;ll pay securely by card on the next page (powered by Stripe). We check your design before anything prints.{" "}
           <Link href="/ordering" className="underline hover:text-navy">How it works</Link>
         </p>
+        <details className="mt-3 text-xs text-ink/60">
+          <summary className="cursor-pointer font-medium text-navy hover:underline">Returns &amp; refunds</summary>
+          <p className="mt-1 leading-relaxed">{returnPolicy}</p>
+        </details>
         {state?.error && <p className="mt-4 rounded-lg bg-magenta/10 px-3 py-2 text-sm text-magenta">{state.error}</p>}
         <button type="submit" disabled={pending || options.length === 0} className="btn-primary mt-6 w-full">
           {pending ? "Redirecting to payment…" : "Continue to payment"}

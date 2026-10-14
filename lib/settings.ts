@@ -8,8 +8,10 @@ export type StoreSettings = {
   taxRate: number;
   pickup: { enabled: boolean; note: string };
   delivery: { enabled: boolean; note: string };
-  /** Where shop notifications (new orders, proof answers) are emailed. Not shown on the site. */
+  /** Where shop notifications (new orders) are emailed. Not shown on the site. */
   notifyEmail: string;
+  /** Return & refund policy, shown on the Ordering page, at checkout and on refund requests. */
+  returnPolicy: string;
 };
 
 export const defaultSettings: StoreSettings = {
@@ -18,6 +20,8 @@ export const defaultSettings: StoreSettings = {
   pickup: { enabled: true, note: `${defaultSite.address.line1}, ${defaultSite.address.line2}, ${defaultSite.address.city}` },
   delivery: { enabled: true, note: "Delivery cost is quoted and invoiced separately" },
   notifyEmail: "maxxprintingtx@shotokancenter.com",
+  returnPolicy:
+    "Everything we make is printed just for you, so custom items can't be returned or exchanged. If your order arrives misprinted, damaged or different from the design you ordered, tell us within 7 days of pickup or delivery and we'll reprint it or refund you. Refunds go back to the card you paid with and usually show up in 5 to 10 business days.",
 };
 
 /** Saved settings over the defaults, field by field, so a partial or older saved value still works. */
@@ -29,8 +33,9 @@ export function mergeSettings(saved: Partial<StoreSettings> | null | undefined):
     pickup: { ...d.pickup, ...saved?.pickup },
     delivery: { ...d.delivery, ...saved?.delivery },
     notifyEmail: typeof saved?.notifyEmail === "string" && saved.notifyEmail ? saved.notifyEmail : d.notifyEmail,
+    returnPolicy: typeof saved?.returnPolicy === "string" && saved.returnPolicy.trim() ? saved.returnPolicy : d.returnPolicy,
   };
 }
 
 /** The part of the settings the browser needs (cart totals, checkout options). */
-export type PublicSettings = Pick<StoreSettings, "taxRate" | "pickup" | "delivery">;
+export type PublicSettings = Pick<StoreSettings, "taxRate" | "pickup" | "delivery" | "returnPolicy">;

@@ -1,17 +1,19 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import type { Order } from "./db";
-import { baseProduct, type ProductOverride } from "./catalog";
-import { randomUUID } from "node:crypto";
+import { readAddressBook } from "./address";
+import type { Approval, Order } from "./db";
+import { baseProduct, formatPrice, type ProductOverride } from "./catalog";
 import { redirect } from "next/navigation";
 import {
-  adminUpdateUser, createStaff, deleteOverride, deleteStaff, findOrder, findStaffByEmail, findStaffById, findUserById, markEmailVerified, moveApproval, ORDER_STATUSES,
-  saveOverride, saveSettings, setOrderAdminNotes, setOrderPayment, setOrderStatus, setStaffPassword, setUserPassword, touchStaffLogin,
+  adminUpdateUser, createStaff, deleteOverride, deleteStaff, findOrder, findStaffByEmail, findStaffById, findUserById, markEmailVerified, moveApproval, ORDER_STATUSES, addOrderEvent, declineRefund, recordRefund,
+  saveOverride, saveSettings, saveUserAddresses, setOrderAdminNotes, setOrderPayment, setOrderStatus, setStaffPassword, setUserPassword, touchStaffLogin,
 } from "./db";
 import { endOfDayHouston } from "./dates";
-import { saveProofImage, sniffImage } from "./files";
-import { activationRequired, emailArtworkNeeded, emailOrderPlaced, emailOrderReady, emailProofReady } from "./email";
+import {
+  activationRequired, emailArtworkNeeded, emailOrderPlaced, emailOrderStep, emailRefundDeclined, emailRefunded, sendTestEmail,
+} from "./email";
+import { refundPayment } from "./payments";
 import { sendActivationEmail } from "./verification";
 import { defaultSettings, mergeSettings, type StoreSettings } from "./settings";
 import { hashPassword, verifyPassword } from "./session";
@@ -40,9 +42,11 @@ export async function updateOrderStatus(form: FormData) {
   // Nothing goes to production before the artwork is approved.
   if (status !== "Received" && order.approval !== "approved") return;
   await setOrderStatus(order.id, status);
-  if (status === "Ready" && order.status !== "Ready") {
+  // Tell the customer about each step forward (the email shows the order's new step).
+  const step = ({ "In production": "printing", Ready: "ready", Completed: "done" } as const)[status as "In production" | "Ready" | "Completed"];
+  if (step && order.status !== status) {
     const customer = await findUserById(order.userId);
-    if (customer) await emailOrderReady(order, customer);
+    if (customer) await emailOrderStep({ ...order, status }, customer, step);
   }
   revalidatePath("/admin", "layout");
   revalidatePath("/account");
@@ -71,9 +75,15 @@ export async function recordPayment(form: FormData) {
   revalidatePath("/account");
 }
 
-// --- Artwork approval -----------------------------------------------------------------
+const revalidateOrder = () => {
+  revalidatePath("/admin", "layout");
+  revalidatePath("/account");
+};
 
-const MAX_PROOF_BYTES = 8 * 1000 * 1000;
+// --- Design approval (by the shop) -----------------------------------------------------------------
+
+/** Steps before approval; proof_sent / changes_requested are left over from the old customer-proof flow. */
+const TO_CHECK: Approval[] = ["review", "proof_sent", "changes_requested"];
 
 async function notifyCustomer(orderId: string, notify: (order: Order, customer: { name: string; email: string }) => Promise<void>) {
   const order = await findOrder(orderId);
@@ -81,62 +91,38 @@ async function notifyCustomer(orderId: string, notify: (order: Order, customer: 
   if (order && customer) await notify(order, customer);
 }
 
-const revalidateOrder = () => {
-  revalidatePath("/admin", "layout");
-  revalidatePath("/account");
-};
-
-/** Send the customer a proof: a message and optionally an image (the order's design previews are always shown). */
-export async function sendProof(_: FormState, form: FormData): Promise<FormState> {
+/** The design looks good: approve it (the order can go to printing) and tell the customer. */
+export async function approveDesign(form: FormData) {
   const staff = await requireStaff();
   const id = str(form, "id");
-  const note = str(form, "note").slice(0, 3000);
-  const file = form.get("image");
-  let image: string | undefined;
-  if (file instanceof File && file.size > 0) {
-    if (file.size > MAX_PROOF_BYTES) return { error: "The proof image must be 8 MB or smaller." };
-    const bytes = Buffer.from(await file.arrayBuffer());
-    const type = sniffImage(bytes);
-    if (!type) return { error: "The proof must be a PNG, JPG, WEBP or GIF image." };
-    image = randomUUID();
-    try {
-      await saveProofImage(id, image, type, bytes);
-    } catch (e) {
-      console.error("Failed to save proof image", e);
-      return { error: "We couldn't upload the proof image. Please try again." };
-    }
-  }
-  const sent = await moveApproval(id, ["review", "changes_requested", "proof_sent"], "proof_sent", {
+  const moved = await moveApproval(id, [...TO_CHECK, "artwork_issue"], "approved", {
     actor: "staff",
     actorName: staff.name,
-    kind: "proof_sent",
-    note,
-    image,
+    kind: "approved_by_staff",
+    note: str(form, "note").slice(0, 3000),
   });
-  if (!sent) return { error: "This order can't get a proof right now (it may be approved already)." };
-  await notifyCustomer(id, (order, customer) => emailProofReady(order, customer, note));
+  if (moved) await notifyCustomer(id, (order, customer) => emailOrderStep(order, customer, "approved"));
   revalidateOrder();
-  return { ok: "Proof sent. The customer gets an email and sees it in their account." };
 }
 
-/** Staff can't use the artwork as is: tell the customer what's needed. */
+/** The design needs a change: tell the customer what (by email and in their account). */
 export async function flagArtwork(_: FormState, form: FormData): Promise<FormState> {
   const staff = await requireStaff();
   const note = str(form, "note").slice(0, 3000);
-  if (note.length < 5) return { error: "Tell the customer what's wrong or what you need." };
-  const moved = await moveApproval(str(form, "id"), ["review", "changes_requested", "proof_sent"], "artwork_issue", {
+  if (note.length < 5) return { error: "Tell the customer what to change." };
+  const moved = await moveApproval(str(form, "id"), TO_CHECK, "artwork_issue", {
     actor: "staff",
     actorName: staff.name,
     kind: "artwork_issue",
     note,
   });
-  if (!moved) return { error: "This order's approval has already moved on. Reload the page." };
+  if (!moved) return { error: "This order's design was already handled. Reload the page." };
   await notifyCustomer(str(form, "id"), (order, customer) => emailArtworkNeeded(order, customer, note));
   revalidateOrder();
-  return { ok: "Saved. The customer gets your message by email and in their account." };
+  return { ok: "Sent. The customer gets your message by email and in their account." };
 }
 
-/** The customer sent what was needed: back to staff review. */
+/** The customer sent a fixed design: back to checking. */
 export async function artworkResolved(form: FormData) {
   const staff = await requireStaff();
   await moveApproval(str(form, "id"), ["artwork_issue"], "review", {
@@ -144,18 +130,6 @@ export async function artworkResolved(form: FormData) {
     actorName: staff.name,
     kind: "artwork_ok",
     note: str(form, "note").slice(0, 3000),
-  });
-  revalidateOrder();
-}
-
-/** Record an approval the customer gave another way (phone, email, in store). */
-export async function approveForCustomer(form: FormData) {
-  const staff = await requireStaff();
-  await moveApproval(str(form, "id"), ["review", "artwork_issue", "proof_sent", "changes_requested"], "approved", {
-    actor: "staff",
-    actorName: staff.name,
-    kind: "approved_by_staff",
-    note: str(form, "note").slice(0, 3000) || "Approved by the customer outside the website.",
   });
   revalidateOrder();
 }
@@ -398,6 +372,15 @@ export async function changeMyPassword(_: FormState, form: FormData): Promise<Fo
 
 // --- Settings -----------------------------------------------------------------
 
+/** Send a test email (to the order notification address unless another is given). */
+export async function sendTestEmailAction(_: FormState, form: FormData): Promise<FormState> {
+  await requireStaff();
+  const to = (str(form, "to") || (await getSettings()).notifyEmail).toLowerCase();
+  if (!EMAIL.test(to)) return { error: "Please enter a valid email." };
+  const result = await sendTestEmail(to);
+  return result.ok ? { ok: `Test email sent to ${to}. Check the inbox (and the spam folder).` } : { error: `The mail server refused it: ${result.error}` };
+}
+
 export async function saveStoreSettings(_: FormState, form: FormData): Promise<FormState> {
   await requireStaff();
   const current = await getSettings();
@@ -436,8 +419,68 @@ export async function saveStoreSettings(_: FormState, form: FormData): Promise<F
     pickup: { enabled: pickup, note: str(form, "pickupNote") || defaultSettings.pickup.note },
     delivery: { enabled: delivery, note: str(form, "deliveryNote") || defaultSettings.delivery.note },
     notifyEmail,
+    returnPolicy: str(form, "returnPolicy").slice(0, 4000),
   });
   await saveSettings(next);
   revalidateShop();
   return { ok: "Settings saved." };
+}
+
+export async function saveCustomerAddresses(_: FormState, form: FormData): Promise<FormState> {
+  await requireStaff();
+  const user = await findUserById(str(form, "id"));
+  if (!user) return { error: "Customer not found." };
+  const book = readAddressBook(form);
+  if (typeof book === "string") return { error: book };
+  await saveUserAddresses(user.id, book.billing, book.shipping);
+  revalidatePath("/admin", "layout");
+  return { ok: "Addresses saved." };
+}
+
+// --- Refunds -----------------------------------------------------------------
+
+/** Refund some or all of an order: back to the card through Stripe, or recorded for cash/check/invoice. */
+export async function refundOrderAction(_: FormState, form: FormData): Promise<FormState> {
+  const staff = await requireStaff();
+  const order = await findOrder(str(form, "id"));
+  if (!order || order.paymentStatus === "unpaid") return { error: "Only paid or invoiced orders can be refunded." };
+  const left = Math.round((order.subtotal + order.tax - order.refundAmount) * 100) / 100;
+  const amount = Math.round(Number(str(form, "amount").replace(/[$,\s]/g, "")) * 100) / 100;
+  if (!(amount > 0)) return { error: "Enter how much to refund." };
+  if (amount > left + 0.001) return { error: `You can refund at most ${formatPrice(left)}.` };
+  const note = str(form, "note").slice(0, 3000);
+
+  let byCard = false;
+  if (order.paymentStatus === "paid" && order.stripeSessionId) {
+    try {
+      byCard = !!(await refundPayment(order, Math.round(amount * 100)));
+    } catch (e) {
+      console.error("Stripe refund failed", order.number, e);
+      return { error: `Stripe refused the refund: ${e instanceof Error ? e.message : String(e)}` };
+    }
+  }
+  if (!(await recordRefund(order.id, amount))) return { error: "The refund couldn't be saved. Reload the page and check the order." };
+  await addOrderEvent(order.id, {
+    actor: "staff",
+    actorName: staff.name,
+    kind: "refunded",
+    note: [`${formatPrice(amount)} ${byCard ? "refunded to the card through Stripe" : "recorded (give it back by cash or check)"}.`, note].filter(Boolean).join(" "),
+  });
+  const customer = await findUserById(order.userId);
+  if (customer) await emailRefunded(order, customer, amount, byCard, note);
+  revalidateOrder();
+  return { ok: byCard ? `Refunded ${formatPrice(amount)} to the customer's card. They got an email.` : `Recorded a ${formatPrice(amount)} refund. Give the money back by cash or check. The customer got an email.` };
+}
+
+export async function declineRefundAction(_: FormState, form: FormData): Promise<FormState> {
+  const staff = await requireStaff();
+  const note = str(form, "note").slice(0, 3000);
+  if (note.length < 5) return { error: "Tell the customer why (they get this by email)." };
+  const order = await findOrder(str(form, "id"));
+  if (!order || !(await declineRefund(order.id))) return { error: "There's no open refund request on this order." };
+  await addOrderEvent(order.id, { actor: "staff", actorName: staff.name, kind: "refund_declined", note });
+  const customer = await findUserById(order.userId);
+  if (customer) await emailRefundDeclined(order, customer, note);
+  revalidateOrder();
+  return { ok: "Declined. The customer got an email with your reason." };
 }

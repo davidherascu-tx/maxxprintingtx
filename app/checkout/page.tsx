@@ -15,7 +15,7 @@ export default async function CheckoutPage() {
       <p className="mt-2 text-ink/60">
         Ordering as <span className="font-medium text-ink">{user.name}</span> ({user.email})
       </p>
-      <CheckoutForm />
+      <CheckoutForm billing={user.billingAddress} shipping={user.shippingAddress} name={user.name} phone={user.phone} company={user.company} />
     </div>
   );
 }

@@ -851,7 +851,7 @@ export function Studio({ product, config, fonts, initial, initialVariant }: Stud
                 : "Add some text or an image to your design first."}
             </p>
           )}
-          <p className="mt-2 text-xs text-white/60">We&apos;ll send a proof before anything prints.</p>
+          <p className="mt-2 text-xs text-white/60">Our team checks your design before anything prints.</p>
         </div>
       </aside>
 

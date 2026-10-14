@@ -1,66 +1,74 @@
 import type { Metadata } from "next";
-import { APPROVALS, ORDER_STATUSES, PAYMENT_FILTERS, searchOrders, type PaymentFilter } from "@/lib/db";
+import Link from "next/link";
+import { searchOrders } from "@/lib/db";
 import type { DesignSource } from "@/lib/design-config";
-import { sourceLabel, staffApprovalLabel } from "@/components/approval";
+import { ORDER_VIEWS, orderView } from "@/lib/order-views";
 import { requireStaff } from "@/lib/staff-session";
-import { Card, PageHeader, Pagination } from "@/components/admin/ui";
-import { OrderTable } from "@/components/admin/order-table";
+import { sourceLabel } from "@/components/approval";
+import { OrderCards } from "@/components/admin/order-cards";
+import { Pagination } from "@/components/admin/ui";
 
 export const metadata: Metadata = { title: "Orders" };
 
-const paymentNames: Record<PaymentFilter, string> = {
-  placed: "Paid & invoiced",
-  paid: "Paid",
-  invoice: "Invoiced",
-  unpaid: "Awaiting payment",
-  all: "Everything",
-};
-
 const SOURCES: DesignSource[] = ["studio", "dtf", "none"];
 
-export default async function AdminOrders({
-  searchParams,
-}: {
-  searchParams: Promise<{ q?: string; status?: string; payment?: string; approval?: string; source?: string; page?: string }>;
-}) {
+export default async function AdminOrders({ searchParams }: { searchParams: Promise<{ view?: string; q?: string; source?: string; page?: string }> }) {
   await requireStaff("/admin/orders");
   const sp = await searchParams;
-  const payment = PAYMENT_FILTERS.find((p) => p === sp.payment) ?? "placed";
-  const status = ORDER_STATUSES.find((s) => s === sp.status);
-  const approval = APPROVALS.find((a) => a === sp.approval);
+  // Searching looks through every order; otherwise show the chosen tab (default: "To check").
+  const view = orderView(sp.view) ?? (sp.q ? orderView("all")! : orderView("check")!);
   const source = SOURCES.find((s) => s === sp.source);
-  const { orders, total, page, pages } = await searchOrders({ q: sp.q, status, payment, approval, source, page: Number(sp.page) || 1 });
+  const { orders, total, page, pages } = await searchOrders({
+    q: sp.q,
+    approval: view.approval,
+    status: view.status,
+    payment: view.payment ?? "placed",
+    open: view.open,
+    refund: view.refund,
+    source,
+    page: Number(sp.page) || 1,
+  });
 
   return (
     <>
-      <PageHeader title="Orders" />
-      <form method="get" className="mb-4 flex flex-wrap gap-2">
-        <input name="q" defaultValue={sp.q} placeholder="Order #, name, email or company" aria-label="Search orders" className="field w-full sm:w-72" />
-        <select name="status" defaultValue={status ?? ""} aria-label="Status" className="field w-auto">
-          <option value="">Any status</option>
-          {ORDER_STATUSES.map((s) => <option key={s}>{s}</option>)}
-        </select>
-        <select name="approval" defaultValue={approval ?? ""} aria-label="Approval" className="field w-auto">
-          <option value="">Any approval</option>
-          {APPROVALS.map((a) => <option key={a} value={a}>{staffApprovalLabel[a]}</option>)}
-        </select>
-        <select name="source" defaultValue={source ?? ""} aria-label="Design" className="field w-auto">
+      <h1 className="font-display text-3xl text-navy sm:text-4xl">📦 Orders</h1>
+
+      <nav aria-label="Order lists" className="mt-5 flex flex-wrap gap-2">
+        {ORDER_VIEWS.map((v) => (
+          <Link
+            key={v.key}
+            href={`/admin/orders?view=${v.key}`}
+            aria-current={v.key === view.key ? "page" : undefined}
+            className={`flex items-center gap-2 rounded-full px-4 py-2.5 text-base font-semibold transition ${
+              v.key === view.key ? "bg-navy text-white shadow" : "bg-white text-navy ring-1 ring-line hover:bg-mist"
+            }`}
+          >
+            <span aria-hidden>{v.icon}</span> {v.label}
+          </Link>
+        ))}
+      </nav>
+
+      <div className="mt-4 rounded-2xl bg-mist px-5 py-4">
+        <p className="text-lg font-bold text-navy">
+          {view.icon} {view.label}: {total} {total === 1 ? "order" : "orders"}
+        </p>
+        <p className="text-ink/70">{view.hint}</p>
+      </div>
+
+      <form method="get" className="mt-4 flex flex-wrap gap-2">
+        <input type="hidden" name="view" value={view.key} />
+        <input name="q" defaultValue={sp.q} placeholder="🔍 Search: order number, name, email or company" aria-label="Search orders" className="field min-w-0 flex-1 py-3.5 text-base" />
+        <select name="source" defaultValue={source ?? ""} aria-label="Design" className="field w-auto py-3.5 text-base">
           <option value="">Any design</option>
           {SOURCES.map((s) => <option key={s} value={s}>{sourceLabel[s]}</option>)}
         </select>
-        <select name="payment" defaultValue={payment} aria-label="Payment" className="field w-auto">
-          {PAYMENT_FILTERS.map((p) => <option key={p} value={p}>{paymentNames[p]}</option>)}
-        </select>
-        <button type="submit" className="btn-primary px-5">Filter</button>
+        <button type="submit" className="btn-primary px-6 text-base">Search</button>
       </form>
-      <p className="mb-3 text-sm text-ink/60">
-        {total} {total === 1 ? "order" : "orders"}
-        {payment === "placed" && " · orders still awaiting payment are hidden (choose “Awaiting payment” to see them)"}
-      </p>
-      <Card>
-        <OrderTable orders={orders} />
-      </Card>
-      <Pagination page={page} pages={pages} base="/admin/orders" params={{ q: sp.q, status, approval, source, payment: payment === "placed" ? undefined : payment }} />
+
+      <div className="mt-5">
+        <OrderCards orders={orders} empty={sp.q ? "No orders match your search." : `Nothing here right now. 🎉`} />
+      </div>
+      <Pagination page={page} pages={pages} base="/admin/orders" params={{ view: view.key, q: sp.q, source }} />
     </>
   );
 }

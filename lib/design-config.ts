@@ -192,6 +192,12 @@ export type DesignSource = "dtf" | "studio" | "none";
 export const designSource = (item: { slug: string; designId?: string }): DesignSource =>
   !item.designId ? "none" : gangSlugs.includes(item.slug) ? "dtf" : "studio";
 
+/**
+ * Only orders with a design made on the site (Design Studio or DTF gang sheet builder) get a
+ * design check by the shop; everything else is ready to print as soon as it's paid.
+ */
+export const needsDesignCheck = (items: { slug: string; designId?: string }[]) => items.some((i) => designSource(i) !== "none");
+
 export function getDesignConfig(slug: string): DesignConfig | undefined {
   return configs[slug];
 }

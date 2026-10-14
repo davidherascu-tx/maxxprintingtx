@@ -5,7 +5,7 @@ import { formatPrice } from "@/lib/catalog";
 import { findOrderByNumber } from "@/lib/db";
 import { requireStaff } from "@/lib/staff-session";
 import { getSite } from "@/lib/store";
-import { PrintButton } from "@/components/admin/admin-form";
+import { PrintButton } from "@/components/print-button";
 import { dateTime, paymentLabel } from "@/components/admin/ui";
 
 type Props = { params: Promise<{ number: string }> };
