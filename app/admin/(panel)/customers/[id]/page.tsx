@@ -22,7 +22,7 @@ export default async function AdminCustomer({ params }: { params: Promise<{ id: 
   if (!user) notFound();
   const [orders, designs, catalog] = await Promise.all([ordersForUser(id), designsForUser(id), getCatalog()]);
   const placed = orders.filter((o) => o.paymentStatus !== "unpaid");
-  const spent = placed.filter((o) => o.paymentStatus === "paid").reduce((n, o) => n + o.subtotal + o.tax, 0);
+  const spent = placed.filter((o) => o.paymentStatus === "paid").reduce((n, o) => n + o.subtotal + o.tax + o.shipping, 0);
 
   return (
     <>
@@ -57,7 +57,7 @@ export default async function AdminCustomer({ params }: { params: Promise<{ id: 
                       <PaymentBadge status={o.paymentStatus} />
                       {o.paymentStatus !== "unpaid" && <ApprovalBadge approval={o.approval} />}
                       <StatusBadge status={o.status} />
-                      <span className="w-24 text-right font-medium">{formatPrice(o.subtotal + o.tax)}</span>
+                      <span className="w-24 text-right font-medium">{formatPrice(o.subtotal + o.tax + o.shipping)}</span>
                     </div>
                   </li>
                 ))}

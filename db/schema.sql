@@ -108,3 +108,6 @@ ALTER TABLE orders ADD COLUMN IF NOT EXISTS refund_reason text;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS refund_requested_at timestamptz;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS refund_amount numeric NOT NULL DEFAULT 0;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS refunded_at timestamptz;
+
+-- Shipping: flat per-product cost charged when the customer chooses shipping instead of pickup.
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS shipping numeric NOT NULL DEFAULT 0;

@@ -34,7 +34,7 @@ export function OrderCards({ orders, empty }: { orders: AdminOrder[]; empty: str
                 </p>
               </div>
               <div className="text-right">
-                <p className="text-lg font-bold text-navy">{formatPrice(o.subtotal + o.tax)}</p>
+                <p className="text-lg font-bold text-navy">{formatPrice(o.subtotal + o.tax + o.shipping)}</p>
                 <span className="mt-1 inline-block rounded-full bg-navy px-4 py-1.5 text-sm font-bold text-white">Open →</span>
               </div>
             </Link>

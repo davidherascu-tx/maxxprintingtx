@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useActionState, useState } from "react";
 import { placeOrder } from "@/lib/actions";
-import { colorOf, formatPrice } from "@/lib/catalog";
+import { colorOf, formatPrice, shippingFor } from "@/lib/catalog";
 import { calcTax, taxLabel } from "@/lib/tax";
 import { linePrice, useCart } from "./cart";
 import { useCatalog, useStoreSettings } from "./store";
@@ -15,14 +15,19 @@ export function CheckoutForm({ billing, shipping, name, phone, company }: { bill
   const { lines, ready, subtotal } = useCart();
   const catalog = useCatalog();
   const { taxRate, pickup, delivery, returnPolicy } = useStoreSettings();
+  // Shipping is offered only when every product in the cart has a shipping cost.
+  const shippingCost = shippingFor(catalog, lines.map((l) => l.slug));
   const options = (
     [
-      ["pickup", "Store pickup", pickup],
-      ["delivery", "Local delivery", delivery],
+      ["pickup", "Local pickup", pickup],
+      ["delivery", "Shipping", { enabled: delivery.enabled && shippingCost !== null, note: `Shipped to your address for ${formatPrice(shippingCost ?? 0)}` }],
     ] as const
   ).filter(([, , o]) => o.enabled);
-  const [fulfillment, setFulfillment] = useState<"pickup" | "delivery">(options[0]?.[0] ?? "pickup");
+  const [chosen, setFulfillment] = useState<"pickup" | "delivery">(options[0]?.[0] ?? "pickup");
+  // The cart can change (e.g. a product is removed) so fall back to an option that still exists.
+  const fulfillment = options.some(([v]) => v === chosen) ? chosen : (options[0]?.[0] ?? "pickup");
   const tax = calcTax(subtotal, taxRate);
+  const shipFee = fulfillment === "delivery" ? (shippingCost ?? 0) : 0;
   const [state, action, pending] = useActionState(placeOrder, undefined);
 
   if (!ready) return <div className="mt-8 h-40 animate-pulse rounded-2xl bg-mist" />;
@@ -44,7 +49,7 @@ export function CheckoutForm({ billing, shipping, name, phone, company }: { bill
 
       <div className="space-y-6">
         <fieldset className="rounded-2xl border border-line p-6">
-          <legend className="px-2 font-semibold text-navy">Fulfillment</legend>
+          <legend className="px-2 font-semibold text-navy">Pickup or shipping</legend>
           <div className="grid gap-3 sm:grid-cols-2">
             {options.length === 0 && (
               <p className="text-sm text-magenta sm:col-span-2">Online ordering is paused right now. Please call us to place your order.</p>
@@ -71,7 +76,7 @@ export function CheckoutForm({ billing, shipping, name, phone, company }: { bill
           </div>
           {fulfillment === "delivery" && (
             <div className="mt-5 border-t border-line pt-4">
-              <p className="mb-2 font-medium text-navy">Delivery address</p>
+              <p className="mb-2 font-medium text-navy">Shipping address</p>
               <label className="mb-3 flex items-center gap-2 text-sm">
                 <input type="checkbox" name="shippingSame" checked={shipSame} onChange={(e) => setShipSame(e.target.checked)} className="h-4 w-4 accent-navy" />
                 Same as billing address
@@ -132,13 +137,13 @@ export function CheckoutForm({ billing, shipping, name, phone, company }: { bill
         </div>
         {fulfillment === "delivery" && (
           <div className="mt-2 flex justify-between text-sm text-ink/60">
-            <span>Delivery</span>
-            <span>Quoted separately</span>
+            <span>Shipping</span>
+            <span>{formatPrice(shipFee)}</span>
           </div>
         )}
         <div className="mt-3 flex justify-between border-t border-line pt-3 text-lg font-bold text-navy">
           <span>Total</span>
-          <span>{formatPrice(subtotal + tax)}</span>
+          <span>{formatPrice(subtotal + tax + shipFee)}</span>
         </div>
         <p className="mt-2 text-xs text-ink/50">
           You&apos;ll pay securely by card on the next page (powered by Stripe). We check your design before anything prints.{" "}

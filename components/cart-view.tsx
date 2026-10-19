@@ -85,7 +85,7 @@ export function CartView() {
           <div className="flex justify-between"><dt>Subtotal</dt><dd className="font-semibold">{formatPrice(subtotal)}</dd></div>
           <div className="flex justify-between text-ink/60"><dt>Sales tax ({taxLabel(taxRate)})</dt><dd>{formatPrice(tax)}</dd></div>
           <div className="flex justify-between border-t border-line pt-2 font-semibold text-navy"><dt>Total</dt><dd>{formatPrice(subtotal + tax)}</dd></div>
-          <p className="text-xs text-ink/50">Local delivery is quoted separately. <Link href="/ordering" className="underline hover:text-navy">How it works</Link></p>
+          <p className="text-xs text-ink/50">Shipping (if offered for every item) is added at checkout. <Link href="/ordering" className="underline hover:text-navy">How it works</Link></p>
         </dl>
         <Link href="/checkout" className="btn-primary mt-6 w-full">Checkout</Link>
         <Link href="/shop" className="mt-3 block text-center text-sm text-navy hover:underline">Continue shopping</Link>

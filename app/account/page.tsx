@@ -174,7 +174,7 @@ export default async function AccountPage({
                   </ul>
                   <div className="mt-3 flex justify-between border-t border-line pt-3 text-sm">
                     <span className="text-ink/60">
-                      {o.fulfillment === "pickup" ? "Store pickup" : "Local delivery · quoted separately"}
+                      {o.fulfillment === "pickup" ? "Store pickup" : "Shipping"}
                       {o.tax > 0 && ` · includes ${formatPrice(o.tax)} tax`}
                     </span>
                     <span className="flex items-center gap-3">
@@ -183,7 +183,7 @@ export default async function AccountPage({
                           📄 Invoice
                         </Link>
                       )}
-                      <span className="font-semibold text-navy">{formatPrice(o.subtotal + o.tax)}</span>
+                      <span className="font-semibold text-navy">{formatPrice(o.subtotal + o.tax + o.shipping)}</span>
                     </span>
                   </div>
                   {o.paymentStatus !== "unpaid" && (

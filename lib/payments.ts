@@ -46,6 +46,9 @@ export async function startCheckout(order: Order, email: string, origin: string)
       ...(order.tax > 0
         ? [{ quantity: 1, price_data: { currency, unit_amount: cents(order.tax), product_data: { name: `Sales tax (${taxLabel(taxRate)})` } } }]
         : []),
+      ...(order.shipping > 0
+        ? [{ quantity: 1, price_data: { currency, unit_amount: cents(order.shipping), product_data: { name: "Shipping" } } }]
+        : []),
     ],
     metadata: { order_id: order.id, order_number: order.number },
     payment_intent_data: { description: `Order ${order.number}`, metadata: { order_id: order.id, order_number: order.number } },

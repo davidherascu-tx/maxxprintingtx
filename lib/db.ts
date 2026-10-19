@@ -61,6 +61,8 @@ export type Order = {
   subtotal: number;
   /** Sales tax on the subtotal. */
   tax: number;
+  /** Shipping charged when the customer chose shipping (0 for pickup). */
+  shipping: number;
   paymentStatus: "unpaid" | "paid" | "invoice";
   stripeSessionId?: string;
   notes: string;
@@ -140,6 +142,7 @@ const toOrder = (r: Row): Order => ({
   items: r.items,
   subtotal: Number(r.subtotal),
   tax: Number(r.tax),
+  shipping: Number(r.shipping ?? 0),
   paymentStatus: r.payment_status,
   stripeSessionId: r.stripe_session_id ?? undefined,
   notes: r.notes,
@@ -225,10 +228,10 @@ export async function createOrder(
   input: Omit<Order, "id" | "number" | "status" | "createdAt" | "paymentStatus" | "stripeSessionId" | "adminNotes" | "paidAt" | "approval" | "refundStatus" | "refundReason" | "refundRequestedAt" | "refundAmount" | "refundedAt">,
 ) {
   const [row] = await sql`
-    INSERT INTO orders (id, number, user_id, items, subtotal, tax, notes, fulfillment, address, payment_status, approval, billing_address, shipping_address)
+    INSERT INTO orders (id, number, user_id, items, subtotal, tax, shipping, notes, fulfillment, address, payment_status, approval, billing_address, shipping_address)
     VALUES (
       ${randomUUID()}, 'MX-' || nextval('order_number_seq'), ${input.userId}, ${JSON.stringify(input.items)}::text::jsonb,
-      ${input.subtotal}, ${input.tax}, ${input.notes}, ${input.fulfillment}, ${input.address ?? null}, 'unpaid',
+      ${input.subtotal}, ${input.tax}, ${input.shipping}, ${input.notes}, ${input.fulfillment}, ${input.address ?? null}, 'unpaid',
       ${needsDesignCheck(input.items) ? "review" : "approved"},
       ${input.billingAddress ? JSON.stringify(input.billingAddress) : null}::text::jsonb,
       ${input.shippingAddress ? JSON.stringify(input.shippingAddress) : null}::text::jsonb
@@ -264,7 +267,7 @@ export async function markOrderPaid(id: string, sessionId: string, amountCents: 
   if (!UUID.test(id)) return { paid: false, justPaid: false };
   const updated = await sql`
     UPDATE orders SET payment_status = 'paid', paid_at = now(), stripe_session_id = ${sessionId}
-    WHERE id = ${id} AND payment_status = 'unpaid' AND round((subtotal + tax) * 100) = ${amountCents}
+    WHERE id = ${id} AND payment_status = 'unpaid' AND round((subtotal + tax + shipping) * 100) = ${amountCents}
     RETURNING id`;
   const [row] = await sql`SELECT payment_status FROM orders WHERE id = ${id}`;
   /** justPaid: this call is the one that marked it paid (so confirmation emails go out once). */
@@ -365,10 +368,10 @@ export async function saveSettings(value: unknown) {
 export async function dashboardStats() {
   const [totals] = await sql`
     SELECT
-      COALESCE(sum(subtotal + tax - refund_amount) FILTER (WHERE payment_status = 'paid'
+      COALESCE(sum(subtotal + tax + shipping - refund_amount) FILTER (WHERE payment_status = 'paid'
         AND COALESCE(paid_at, created_at) >= (date_trunc('day', now() AT TIME ZONE 'America/Chicago') AT TIME ZONE 'America/Chicago')), 0) AS today,
-      COALESCE(sum(subtotal + tax - refund_amount) FILTER (WHERE payment_status = 'paid' AND COALESCE(paid_at, created_at) >= now() - interval '7 days'), 0) AS week,
-      COALESCE(sum(subtotal + tax - refund_amount) FILTER (WHERE payment_status = 'paid' AND COALESCE(paid_at, created_at) >= now() - interval '30 days'), 0) AS month,
+      COALESCE(sum(subtotal + tax + shipping - refund_amount) FILTER (WHERE payment_status = 'paid' AND COALESCE(paid_at, created_at) >= now() - interval '7 days'), 0) AS week,
+      COALESCE(sum(subtotal + tax + shipping - refund_amount) FILTER (WHERE payment_status = 'paid' AND COALESCE(paid_at, created_at) >= now() - interval '30 days'), 0) AS month,
       count(*) FILTER (WHERE payment_status = 'paid' AND COALESCE(paid_at, created_at) >= now() - interval '30 days') AS month_orders,
       count(*) FILTER (WHERE payment_status <> 'unpaid' AND status <> 'Completed') AS open_orders,
       count(*) FILTER (WHERE payment_status = 'unpaid') AS awaiting_payment,
@@ -394,7 +397,7 @@ export async function dashboardStats() {
     SELECT count(*) AS total, count(*) FILTER (WHERE created_at >= now() - interval '30 days') AS new_30 FROM users`;
   const daily = await sql`
     SELECT to_char(date_trunc('day', COALESCE(paid_at, created_at) AT TIME ZONE 'America/Chicago'), 'YYYY-MM-DD') AS day,
-           sum(subtotal + tax - refund_amount) AS revenue, count(*) AS orders
+           sum(subtotal + tax + shipping - refund_amount) AS revenue, count(*) AS orders
     FROM orders
     WHERE payment_status = 'paid' AND COALESCE(paid_at, created_at) >= now() - interval '30 days'
     GROUP BY 1 ORDER BY 1`;
@@ -524,7 +527,7 @@ export async function searchCustomers(opts: { q?: string; page?: number }) {
   const rows = await sql`
     SELECT u.*,
            count(o.id) FILTER (WHERE o.payment_status <> 'unpaid') AS order_count,
-           COALESCE(sum(o.subtotal + o.tax) FILTER (WHERE o.payment_status = 'paid'), 0) AS spent,
+           COALESCE(sum(o.subtotal + o.tax + o.shipping) FILTER (WHERE o.payment_status = 'paid'), 0) AS spent,
            max(o.created_at) FILTER (WHERE o.payment_status <> 'unpaid') AS last_order,
            count(*) OVER () AS total_count
     FROM users u LEFT JOIN orders o ON o.user_id = u.id
@@ -772,7 +775,7 @@ export async function requestRefund(orderId: string, userId: string, reason: str
     UPDATE orders SET refund_status = 'requested', refund_reason = ${reason}, refund_requested_at = now()
     WHERE id = ${orderId} AND user_id = ${userId} AND payment_status <> 'unpaid'
       AND (refund_status IS NULL OR refund_status IN ('declined', 'partial'))
-      AND refund_amount < subtotal + tax
+      AND refund_amount < subtotal + tax + shipping
     RETURNING id`;
   return rows.length > 0;
 }
@@ -786,9 +789,9 @@ export async function recordRefund(orderId: string, amount: number) {
   const [row] = await sql`
     UPDATE orders SET
       refund_amount = refund_amount + ${amount},
-      refund_status = CASE WHEN refund_amount + ${amount} >= subtotal + tax - 0.005 THEN 'refunded' ELSE 'partial' END,
+      refund_status = CASE WHEN refund_amount + ${amount} >= subtotal + tax + shipping - 0.005 THEN 'refunded' ELSE 'partial' END,
       refunded_at = now()
-    WHERE id = ${orderId} AND payment_status <> 'unpaid' AND refund_amount + ${amount} <= subtotal + tax + 0.005
+    WHERE id = ${orderId} AND payment_status <> 'unpaid' AND refund_amount + ${amount} <= subtotal + tax + shipping + 0.005
     RETURNING refund_status`;
   return (row?.refund_status as "refunded" | "partial" | undefined) ?? null;
 }

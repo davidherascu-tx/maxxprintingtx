@@ -86,7 +86,8 @@ export default async function PackingSlip({ params }: Props) {
         <dl className="mt-4 ml-auto w-56 space-y-1 text-sm">
           <div className="flex justify-between"><dt>Subtotal</dt><dd>{formatPrice(order.subtotal)}</dd></div>
           <div className="flex justify-between"><dt>Tax</dt><dd>{formatPrice(order.tax)}</dd></div>
-          <div className="flex justify-between border-t border-line pt-1 font-semibold"><dt>Total</dt><dd>{formatPrice(order.subtotal + order.tax)}</dd></div>
+          {order.shipping > 0 && <div className="flex justify-between"><dt>Shipping</dt><dd>{formatPrice(order.shipping)}</dd></div>}
+          <div className="flex justify-between border-t border-line pt-1 font-semibold"><dt>Total</dt><dd>{formatPrice(order.subtotal + order.tax + order.shipping)}</dd></div>
         </dl>
         {order.notes && (
           <section className="mt-6 border-t border-line pt-4 text-sm">

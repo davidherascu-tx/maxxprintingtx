@@ -24,7 +24,8 @@ export default async function AdminProduct({ params }: Props) {
   const base = baseProduct(slug);
   if (!base) notFound();
   const o = (await getOverrides())[slug] ?? {};
-  const hasSale = Object.values(o.variants ?? {}).some((v) => v.salePrice !== undefined);
+  const shippingCost = o.shippingCost ?? base.shippingCost;
+  const hasSale =Object.values(o.variants ?? {}).some((v) => v.salePrice !== undefined);
   const running = hasSale && saleRunning(o, getNow());
 
   return (
@@ -58,6 +59,28 @@ export default async function AdminProduct({ params }: Props) {
                 Hide product from the shop
               </label>
             </div>
+
+            <fieldset className="rounded-xl border border-line p-4">
+              <legend className="px-1 text-sm font-semibold text-navy">Shipping</legend>
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" name="pickupOnly" defaultChecked={shippingCost === undefined} className="h-4 w-4 accent-navy" />
+                Local pickup only (no shipping)
+              </label>
+              <div className="mt-3">
+                <label htmlFor="shippingCost" className="label">Shipping cost (USD)</label>
+                <input
+                  id="shippingCost"
+                  name="shippingCost"
+                  defaultValue={shippingCost === undefined ? "" : shippingCost.toFixed(2)}
+                  inputMode="decimal"
+                  placeholder="0.00"
+                  className="field w-40"
+                />
+                <p className="mt-1 text-xs text-ink/50">
+                  Flat cost per product in an order. With a cost entered (and &ldquo;Local pickup only&rdquo; unticked), customers can choose pickup or shipping. If any product in the cart is pickup only, the whole order is pickup.
+                </p>
+              </div>
+            </fieldset>
 
             <fieldset className="rounded-xl border border-magenta/25 bg-magenta/5 p-4">
               <legend className="px-1 text-sm font-semibold text-magenta">Sale</legend>

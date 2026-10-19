@@ -159,6 +159,13 @@ export async function saveProduct(_: FormState, form: FormData): Promise<FormSta
   const featured = form.get("featured") === "on";
   if (featured !== !!base.featured) o.featured = featured;
   if (form.get("hidden") === "on") o.hidden = true;
+  // Local pickup only (no shipping cost) unless a shipping cost is entered.
+  if (form.get("pickupOnly") !== "on") {
+    const shipping = parsePrice(str(form, "shippingCost"));
+    if (shipping === "invalid") return { error: "Check the shipping cost." };
+    if (shipping === null) return { error: "Enter a shipping cost, or tick \"Local pickup only\"." };
+    if (shipping !== base.shippingCost) o.shippingCost = shipping;
+  }
 
   const variants: NonNullable<ProductOverride["variants"]> = {};
   let onSale = false;
@@ -444,7 +451,7 @@ export async function refundOrderAction(_: FormState, form: FormData): Promise<F
   const staff = await requireStaff();
   const order = await findOrder(str(form, "id"));
   if (!order || order.paymentStatus === "unpaid") return { error: "Only paid or invoiced orders can be refunded." };
-  const left = Math.round((order.subtotal + order.tax - order.refundAmount) * 100) / 100;
+  const left = Math.round((order.subtotal + order.tax + order.shipping - order.refundAmount) * 100) / 100;
   const amount = Math.round(Number(str(form, "amount").replace(/[$,\s]/g, "")) * 100) / 100;
   if (!(amount > 0)) return { error: "Enter how much to refund." };
   if (amount > left + 0.001) return { error: `You can refund at most ${formatPrice(left)}.` };

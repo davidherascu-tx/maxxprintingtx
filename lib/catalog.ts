@@ -46,6 +46,8 @@ export type Product = {
   featured?: boolean;
   /** When the current sale ends (ISO), if a sale with an end date is running. */
   saleEndsAt?: string;
+  /** Flat shipping cost (dollars) per product in an order. Undefined = local pickup only. */
+  shippingCost?: number;
 };
 
 /** Categories and products as defined in code. Admin edits are layered on top by `makeCatalog`. */
@@ -575,6 +577,8 @@ export type ProductOverride = {
   variants?: Record<string, { price?: number | null; salePrice?: number; hidden?: boolean }>;
   /** Sale prices apply until this moment (ISO); no date means until staff remove them. */
   saleEndsAt?: string;
+  /** Flat shipping cost in dollars; absent = local pickup only. */
+  shippingCost?: number;
 };
 export type Overrides = Record<string, ProductOverride>;
 
@@ -603,6 +607,7 @@ function applyOverride(base: Product, o: ProductOverride | undefined, now: numbe
     name: o.name ?? base.name,
     description: o.description ?? base.description,
     featured: o.featured ?? base.featured,
+    shippingCost: o.shippingCost ?? base.shippingCost,
     variants,
     ...(onSale && o.saleEndsAt && { saleEndsAt: o.saleEndsAt }),
     onSale,
@@ -632,3 +637,17 @@ export function makeCatalog(overrides: Overrides = {}, now = Date.now()) {
   };
 }
 export type Catalog = ReturnType<typeof makeCatalog>;
+
+/**
+ * Shipping for a cart: each distinct product's flat shipping cost, added up. Null when any product
+ * is local pickup only, because then the whole order has to be picked up.
+ */
+export function shippingFor(catalog: Catalog, slugs: string[]): number | null {
+  let total = 0;
+  for (const slug of new Set(slugs)) {
+    const cost = catalog.getProduct(slug)?.shippingCost;
+    if (cost === undefined) return null;
+    total += cost;
+  }
+  return Math.round(total * 100) / 100;
+}

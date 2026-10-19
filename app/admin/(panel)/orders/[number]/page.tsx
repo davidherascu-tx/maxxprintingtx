@@ -241,7 +241,8 @@ export default async function AdminOrder({ params }: Props) {
             <dl className="mt-3 space-y-1 border-t border-line pt-3 text-right text-sm">
               <div className="text-ink/60">Subtotal {formatPrice(order.subtotal)}</div>
               <div className="text-ink/60">Tax {formatPrice(order.tax)}</div>
-              <div className="font-semibold text-navy">Total {formatPrice(order.subtotal + order.tax)}</div>
+              {order.shipping > 0 && <div className="text-ink/60">Shipping {formatPrice(order.shipping)}</div>}
+              <div className="font-semibold text-navy">Total {formatPrice(order.subtotal + order.tax + order.shipping)}</div>
             </dl>
           </Card>
 
@@ -306,7 +307,7 @@ export default async function AdminOrder({ params }: Props) {
           </Card>
 
           {order.paymentStatus !== "unpaid" && (() => {
-            const total = order.subtotal + order.tax;
+            const total = order.subtotal + order.tax + order.shipping;
             const left = Math.round((total - order.refundAmount) * 100) / 100;
             const requested = order.refundStatus === "requested";
             return (

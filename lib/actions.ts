@@ -13,7 +13,7 @@ import { deleteStaffSession } from "./staff-session";
 import { activationRequired, emailConfigured, emailRefundRequested } from "./email";
 import { readResetToken, sendActivationEmail, sendPasswordResetEmail } from "./verification";
 import { createSession, deleteSession, getCurrentUser, hashPassword, verifyPassword } from "./session";
-import { colorOf } from "./catalog";
+import { colorOf, shippingFor } from "./catalog";
 import { getCatalog, getSettings } from "./store";
 import { requiresDesign } from "./design-config";
 import { expireSession, paymentsConfigured, startCheckout } from "./payments";
@@ -150,7 +150,8 @@ export async function placeOrder(_: FormState, form: FormData): Promise<FormStat
   }
 
   // Re-price every line from the catalog (with admin edits); never trust client prices.
-  const [{ getProduct }, settings] = await Promise.all([getCatalog(), getSettings()]);
+  const [catalog, settings] = await Promise.all([getCatalog(), getSettings()]);
+  const { getProduct } = catalog;
   const items = (
     await Promise.all(
       raw.map(async (line) => {
@@ -186,6 +187,11 @@ export async function placeOrder(_: FormState, form: FormData): Promise<FormStat
   if (designIds.length) await claimDesigns(designIds, user.id);
 
   const fulfillment = str(form, "fulfillment") === "delivery" ? "delivery" : "pickup";
+  // Shipping is only offered when every product in the cart has a shipping cost.
+  const cartShipping = shippingFor(catalog, items.map((i) => i.slug));
+  if (fulfillment === "delivery" && cartShipping === null) {
+    return { error: "Some items in your cart are local pickup only. Please choose pickup." };
+  }
   if (!settings[fulfillment].enabled) {
     return { error: fulfillment === "delivery" ? "Delivery isn't available right now. Please choose pickup." : "Store pickup isn't available right now. Please choose delivery." };
   }
@@ -216,6 +222,7 @@ export async function placeOrder(_: FormState, form: FormData): Promise<FormStat
     items,
     subtotal,
     tax: calcTax(subtotal, settings.taxRate),
+    shipping: fulfillment === "delivery" ? (cartShipping ?? 0) : 0,
     notes: str(form, "notes").slice(0, 2000),
     fulfillment,
     address: shippingAddress ? formatAddress(shippingAddress) : undefined,

@@ -110,7 +110,8 @@ function layout(site: Site, o: { heading: string; intro: string; note?: string; 
           )
           .join("")}
         <tr><td style="padding:8px 0;color:#64748b">Tax</td><td style="padding:8px 0;text-align:right">${formatPrice(o.order.tax)}</td></tr>
-        <tr><td style="padding:0;font-weight:bold;color:#02245b">Total</td><td style="padding:0;text-align:right;font-weight:bold;color:#02245b">${formatPrice(o.order.subtotal + o.order.tax)}</td></tr>
+        ${o.order.shipping > 0 ? `<tr><td style="padding:8px 0;color:#64748b">Shipping</td><td style="padding:8px 0;text-align:right">${formatPrice(o.order.shipping)}</td></tr>` : ""}
+        <tr><td style="padding:0;font-weight:bold;color:#02245b">Total</td><td style="padding:0;text-align:right;font-weight:bold;color:#02245b">${formatPrice(o.order.subtotal + o.order.tax + o.order.shipping)}</td></tr>
       </table>`
     : "";
   const html = `<!doctype html><html><body style="margin:0;background:#f1f4f9;font-family:Arial,Helvetica,sans-serif;color:#0f172a">
@@ -163,12 +164,12 @@ export async function emailOrderPlaced(order: Order, customer: Customer) {
         order,
         button: { href: `${base}/account`, label: "View your order" },
       }),
-      text: plain(site, [`Thanks for your order, ${first(customer.name)}!`, `We've received order ${order.number}. ${next}`, `Total: ${formatPrice(order.subtotal + order.tax)}`, `View your order: ${base}/account`]),
+      text: plain(site, [`Thanks for your order, ${first(customer.name)}!`, `We've received order ${order.number}. ${next}`, `Total: ${formatPrice(order.subtotal + order.tax + order.shipping)}`, `View your order: ${base}/account`]),
     },
     {
       to: notifyEmail,
       replyTo: customer.email,
-      subject: `New order ${order.number} · ${formatPrice(order.subtotal + order.tax)}${check ? " · design to check" : ""}`,
+      subject: `New order ${order.number} · ${formatPrice(order.subtotal + order.tax + order.shipping)}${check ? " · design to check" : ""}`,
       html: layout(site, {
         heading: `New order ${order.number}`,
         intro: `From <b>${esc(customer.name)}</b> (${esc(customer.email)}) · ${order.fulfillment === "pickup" ? "store pickup" : "local delivery"}.${check ? " It has a Design Studio design to check and approve." : " Ready to print."}`,
@@ -313,7 +314,7 @@ export async function emailPasswordReset(customer: Customer, link: string) {
 export async function emailRefundRequested(order: Order, customer: Customer, reason: string) {
   const { site, notifyEmail } = await getSettings();
   const base = await origin(site);
-  const total = formatPrice(order.subtotal + order.tax);
+  const total = formatPrice(order.subtotal + order.tax + order.shipping);
   queue([
     {
       to: notifyEmail,

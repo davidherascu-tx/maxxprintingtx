@@ -92,16 +92,17 @@ export function Invoice({ order, customer, site }: { order: Order; customer: { n
       <dl className="w-full max-w-64 space-y-1 text-sm">
         <div className="flex justify-between"><dt>Subtotal</dt><dd>{formatPrice(order.subtotal)}</dd></div>
         <div className="flex justify-between"><dt>Sales tax{rate > 0 && ` (${taxLabel(Math.round(rate * 10000) / 10000)})`}</dt><dd>{formatPrice(order.tax)}</dd></div>
+        {order.shipping > 0 && <div className="flex justify-between"><dt>Shipping</dt><dd>{formatPrice(order.shipping)}</dd></div>}
         {order.fulfillment === "delivery" && <div className="flex justify-between text-ink/60"><dt>Delivery</dt><dd>Billed separately</dd></div>}
-        <div className="flex justify-between border-t border-line pt-2 text-base font-bold text-navy"><dt>Total</dt><dd>{formatPrice(order.subtotal + order.tax)}</dd></div>
-        {paid && <div className="flex justify-between text-ink/60"><dt>Amount paid</dt><dd>{formatPrice(order.subtotal + order.tax)}</dd></div>}
+        <div className="flex justify-between border-t border-line pt-2 text-base font-bold text-navy"><dt>Total</dt><dd>{formatPrice(order.subtotal + order.tax + order.shipping)}</dd></div>
+        {paid && <div className="flex justify-between text-ink/60"><dt>Amount paid</dt><dd>{formatPrice(order.subtotal + order.tax + order.shipping)}</dd></div>}
         {order.refundAmount > 0 && (
           <div className="flex justify-between text-magenta">
             <dt>Refunded{order.refundedAt && ` ${day(order.refundedAt)}`}</dt>
             <dd>−{formatPrice(order.refundAmount)}</dd>
           </div>
         )}
-        <div className="flex justify-between font-semibold"><dt>Balance due</dt><dd>{formatPrice(paid ? 0 : order.subtotal + order.tax)}</dd></div>
+        <div className="flex justify-between font-semibold"><dt>Balance due</dt><dd>{formatPrice(paid ? 0 : order.subtotal + order.tax + order.shipping)}</dd></div>
       </dl>
       </div>
 
