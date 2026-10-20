@@ -5,7 +5,7 @@ import { getDesignConfig, isDesignable, isGang } from "@/lib/design-config";
 import { designFontClasses, designFonts } from "@/lib/design-fonts";
 import { readDesignFile } from "@/lib/files";
 import { Studio, type StudioProps } from "@/components/studio/studio";
-import { getCatalog } from "@/lib/store";
+import { getCatalog, getOverrides } from "@/lib/store";
 
 /** A visible product that has a design studio. */
 async function designableProduct(slug: string) {
@@ -40,7 +40,7 @@ export default async function DesignStudioPage({
   const { slug } = await params;
   const { design, variant } = await searchParams;
   const product = await designableProduct(slug);
-  const config = getDesignConfig(slug);
+  const config = getDesignConfig(slug, (await getOverrides())[slug]?.areas);
   if (!product || !config) notFound();
   const initial = await loadDesign(design, slug);
 

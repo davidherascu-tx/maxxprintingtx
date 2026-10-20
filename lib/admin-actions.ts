@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { readAddressBook } from "./address";
 import type { Approval, Order } from "./db";
 import { baseProduct, formatPrice, type ProductOverride } from "./catalog";
+import { getDesignConfig, type Area } from "./design-config";
 import { redirect } from "next/navigation";
 import {
   adminUpdateUser, createStaff, deleteOverride, deleteStaff, findOrder, findStaffByEmail, findStaffById, findUserById, markEmailVerified, moveApproval, ORDER_STATUSES, addOrderEvent, declineRefund, recordRefund,
@@ -198,11 +199,47 @@ export async function saveProduct(_: FormState, form: FormData): Promise<FormSta
     return { error: "At least one option must stay visible. To take the product off the shop, use \"Hide product\" instead." };
   }
   if (Object.keys(variants).length) o.variants = variants;
+  // Print areas are edited on their own page; keep them when the product is saved.
+  const areas = (await getOverrides())[base.slug]?.areas;
+  if (areas) o.areas = areas;
 
   if (Object.keys(o).length) await saveOverride(base.slug, o);
   else await deleteOverride(base.slug);
   revalidateShop();
   return { ok: "Product saved." };
+}
+
+/** Move the Design Studio print box for each side of a product. Values are fractions (0–1) of the mockup image. */
+export async function saveDesignAreas(_: FormState, form: FormData): Promise<FormState> {
+  await requireStaff();
+  const slug = str(form, "slug");
+  const config = getDesignConfig(slug);
+  if (config?.kind !== "mockup") return { error: "Product not found." };
+  const areas: Record<string, Area> = {};
+  for (const side of config.sides) {
+    const [x, y, w, h] = ["x", "y", "w", "h"].map((k) => Number(str(form, `${side.id}:${k}`)));
+    if (![x, y, w, h].every(Number.isFinite) || x < 0 || y < 0 || w < 0.05 || h < 0.05 || x + w > 1.0001 || y + h > 1.0001) {
+      return { error: `Check the print area for ${side.label}.` };
+    }
+    const r = (n: number) => Math.round(n * 1000) / 1000;
+    areas[side.id] = { x: r(x), y: r(y), w: r(w), h: r(h) };
+  }
+  const current: ProductOverride = { ...(await getOverrides())[slug], areas };
+  await saveOverride(slug, current);
+  revalidatePath("/design", "layout");
+  return { ok: "Print areas saved." };
+}
+
+/** Put a product's print areas back to the defaults in code, keeping its other edits. */
+export async function resetDesignAreas(form: FormData) {
+  await requireStaff();
+  const slug = str(form, "slug");
+  const current: ProductOverride = { ...(await getOverrides())[slug] };
+  delete current.areas;
+  if (Object.keys(current).length) await saveOverride(slug, current);
+  else await deleteOverride(slug);
+  revalidatePath("/design", "layout");
+  revalidatePath(`/admin/design-areas/${slug}`);
 }
 
 /** Remove every sale price (and the end date), keeping the product's other edits. */

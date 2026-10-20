@@ -748,6 +748,26 @@ export async function countStaffTodo() {
   return Number(r.n);
 }
 
+/** How many orders each Orders tab holds (keys match lib/order-views.ts). */
+export async function orderViewCounts() {
+  const [r] = await sql`
+    SELECT
+      count(*) FILTER (WHERE payment_status <> 'unpaid' AND status <> 'Completed' AND COALESCE(refund_status, '') <> 'refunded') AS open,
+      count(*) FILTER (WHERE payment_status <> 'unpaid' AND status <> 'Completed' AND COALESCE(refund_status, '') <> 'refunded'
+        AND approval IN ('review', 'proof_sent', 'changes_requested')) AS "check",
+      count(*) FILTER (WHERE payment_status <> 'unpaid' AND status <> 'Completed' AND COALESCE(refund_status, '') <> 'refunded'
+        AND approval = 'artwork_issue') AS waiting,
+      count(*) FILTER (WHERE payment_status <> 'unpaid' AND approval = 'approved' AND status = 'Received') AS print,
+      count(*) FILTER (WHERE payment_status <> 'unpaid' AND status = 'In production') AS printing,
+      count(*) FILTER (WHERE payment_status <> 'unpaid' AND status = 'Ready') AS ready,
+      count(*) FILTER (WHERE payment_status <> 'unpaid' AND status = 'Completed') AS done,
+      count(*) FILTER (WHERE refund_status = 'requested') AS refunds,
+      count(*) FILTER (WHERE payment_status <> 'unpaid') AS "all",
+      count(*) FILTER (WHERE payment_status = 'unpaid') AS unpaid
+    FROM orders`;
+  return Object.fromEntries(Object.entries(r).map(([k, v]) => [k, Number(v)])) as Record<string, number>;
+}
+
 /** Save a customer's addresses. `shipping` null = same as billing. */
 export async function saveUserAddresses(id: string, billing: Address | null, shipping: Address | null) {
   if (!UUID.test(id)) return;

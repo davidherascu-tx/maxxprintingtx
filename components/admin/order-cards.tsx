@@ -2,7 +2,7 @@ import Link from "next/link";
 import { formatPrice } from "@/lib/catalog";
 import type { AdminOrder } from "@/lib/db";
 import { designSource } from "@/lib/design-config";
-import { nextStep } from "@/lib/order-steps";
+import { nextStep, STEPS, stepsDone } from "@/lib/order-steps";
 import { SourceBadge } from "@/components/approval";
 import { dateTime } from "./ui";
 
@@ -28,8 +28,26 @@ export function OrderCards({ orders, empty }: { orders: AdminOrder[]; empty: str
                   {next.yourTurn ? "👉 " : ""}
                   {next.text}
                 </p>
-                <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-ink/50">
-                  {dateTime(o.createdAt)} · {o.items.reduce((n, i) => n + i.qty, 0)} items · {o.fulfillment === "pickup" ? "Pickup" : "Delivery"}
+                <ol className="mt-2 flex items-center gap-1" aria-label={`Progress: ${STEPS[Math.min(stepsDone(o), STEPS.length - 1)].label}`}>
+                  {STEPS.map((s, i) => {
+                    const done = i < stepsDone(o);
+                    const current = i === stepsDone(o);
+                    return (
+                      <li key={s.label} className="flex items-center gap-1">
+                        <span
+                          title={s.label}
+                          className={`flex h-6 items-center rounded-full px-2 text-[11px] font-semibold ${
+                            done ? "bg-cyan/20 text-navy" : current ? "bg-yellow text-navy ring-2 ring-yellow/40" : "bg-mist text-ink/30"
+                          }`}
+                        >
+                          {done ? "✓" : ""}<span className={done || !current ? "hidden sm:inline" : ""}>{done ? " " : ""}{s.label}</span>
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ol>
+                <p className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-ink/50">
+                  {dateTime(o.createdAt)} · {o.items.reduce((n, i) => n + i.qty, 0)} items · {o.fulfillment === "pickup" ? "Pickup" : "Shipping"}
                   {[...new Set(o.items.map(designSource))].map((s) => <SourceBadge key={s} source={s} />)}
                 </p>
               </div>

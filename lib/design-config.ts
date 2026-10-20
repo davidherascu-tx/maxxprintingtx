@@ -198,8 +198,14 @@ export const designSource = (item: { slug: string; designId?: string }): DesignS
  */
 export const needsDesignCheck = (items: { slug: string; designId?: string }[]) => items.some((i) => designSource(i) !== "none");
 
-export function getDesignConfig(slug: string): DesignConfig | undefined {
-  return configs[slug];
+/**
+ * The studio setup for a product. Pass the product's admin-edited print areas (by side id) to
+ * move the print box on the mockup; the code defaults apply to any side without one.
+ */
+export function getDesignConfig(slug: string, areas?: Record<string, Area>): DesignConfig | undefined {
+  const config = configs[slug];
+  if (!areas || config?.kind !== "mockup") return config;
+  return { ...config, sides: config.sides.map((s) => (areas[s.id] ? { ...s, area: areas[s.id] } : s)) };
 }
 
 export const isDesignable = (p: Product) => p.slug in configs;

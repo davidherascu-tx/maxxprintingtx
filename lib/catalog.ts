@@ -1,3 +1,4 @@
+import type { Area } from "./design-config";
 export type Category = {
   slug: string;
   name: string;
@@ -569,6 +570,8 @@ export const formatPrice = (n: number) =>
  * changed, because orders and design files refer to them.
  */
 export type ProductOverride = {
+  /** Design Studio print box per side id, as fractions of the mockup image. */
+  areas?: Record<string, Area>;
   name?: string;
   description?: string;
   hidden?: boolean;

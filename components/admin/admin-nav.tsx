@@ -7,6 +7,7 @@ const links = [
   { href: "/admin", label: "Home", icon: "🏠" },
   { href: "/admin/orders", label: "Orders", icon: "📦" },
   { href: "/admin/products", label: "Products & prices", icon: "🏷️" },
+  { href: "/admin/design-areas", label: "Design studio", icon: "🎨" },
   { href: "/admin/customers", label: "Customers", icon: "👥" },
   { href: "/admin/staff", label: "Staff", icon: "🧑‍💼" },
   { href: "/admin/settings", label: "Settings", icon: "⚙️" },
