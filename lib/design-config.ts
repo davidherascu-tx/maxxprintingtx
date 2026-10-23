@@ -1,7 +1,10 @@
 import { GANG_SHEET_WIDTH_IN, baseProduct, type Product } from "./catalog";
 
-/** Print area as fractions of the mockup image (0–1). */
-export type Area = { x: number; y: number; w: number; h: number };
+/**
+ * Print area as fractions of the mockup image (0–1): its bounding box, plus the corner points
+ * (also fractions) when the area isn't a plain rectangle, e.g. a triangle.
+ */
+export type Area = { x: number; y: number; w: number; h: number; points?: [number, number][] };
 
 export type MockupSide = {
   id: string;

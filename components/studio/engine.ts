@@ -64,6 +64,8 @@ export class StudioEngine {
   /** Bleed zone width in logical pixels (0 when the product has none). */
   bleedPx = 0;
   private pxPerIn = 1;
+  /** Corner points of a non-rectangular print area (logical pixels); null for a plain box. */
+  private poly: { x: number; y: number }[] | null = null;
   private guides: FabricObject[] = [];
   private history = new Map<string, { stack: string[]; index: number }>();
   private side = "";
@@ -127,6 +129,7 @@ export class StudioEngine {
   /** The product outline, grown by `grow` logical pixels on every side (negative shrinks it). */
   private outline(grow: number, opts: Record<string, unknown>) {
     const f = this.f;
+    if (this.poly) return new f.Polygon(this.poly.map((p) => ({ ...p })), opts);
     const base = { left: this.area.left + this.area.width / 2, top: this.area.top + this.area.height / 2, ...opts };
     return this.round
       ? new f.Circle({ ...base, radius: Math.max(1, this.area.width / 2 + grow) })
@@ -159,12 +162,17 @@ export class StudioEngine {
         width: w * s,
         height: h * s,
       });
+      const pts = side.area.points;
+      this.poly = pts && pts.length >= 3
+        ? pts.map(([px, py]) => ({ x: (MOCKUP_SIZE - w * s) / 2 + px * w * s, y: (MOCKUP_SIZE - h * s) / 2 + py * h * s }))
+        : null;
       this.widthIn = side.widthIn;
       this.pxPerIn = this.area.width / side.widthIn;
       this.bleedPx = 0;
       this.background = this.sampleColor(img.getElement() as HTMLImageElement, side.area);
       c.backgroundImage = img;
     } else {
+      this.poly = null;
       const [wIn, hIn] = dims;
       const k = this.gang ? GANG_PX_PER_IN : FLAT_LONG_SIDE / Math.max(wIn, hIn);
       const width = wIn * k, height = hIn * k;

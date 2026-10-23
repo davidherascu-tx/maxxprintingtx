@@ -31,7 +31,7 @@ export default async function AdminDesignArea({ params }: Props) {
         <Link href={`/design/${slug}`} target="_blank" className="btn-outline px-4 py-2">Open in studio ↗</Link>
       </PageHeader>
       <Card>
-        <p className="mb-4 text-sm text-ink/60">Drag the pink box to move it, and the dot in its corner to resize it. This is where customers can add their artwork.</p>
+        <p className="mb-4 text-sm text-ink/60">Drag the dots to reshape the pink area, or drag inside it to move it. Use “Add point” for more corners and “Triangle” for a triangle. This is where customers can add their artwork.</p>
         <AdminForm action={saveDesignAreas} submit="Save print areas" className="space-y-6">
           <input type="hidden" name="slug" value={slug} />
           {config.sides.map((s) => (

@@ -11,7 +11,7 @@ export async function Footer() {
       <div className="cmyk-bar h-1.5" />
       <div className="container-x grid gap-10 py-14 sm:grid-cols-2 lg:grid-cols-4">
         <div>
-          <Image src="/brand/logo-white.png" alt={site.name} width={359} height={200} className="h-14 w-auto" />
+          <Image src="/brand/maxx_logo_footer.webp" alt={site.name} width={367} height={219} className="h-24 w-auto" />
           <p className="mt-4 text-sm leading-relaxed">
             Houston&apos;s one-stop shop for printing, apparel and marketing products.
           </p>

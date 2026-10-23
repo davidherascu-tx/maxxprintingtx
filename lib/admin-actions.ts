@@ -223,6 +223,20 @@ export async function saveDesignAreas(_: FormState, form: FormData): Promise<For
     }
     const r = (n: number) => Math.round(n * 1000) / 1000;
     areas[side.id] = { x: r(x), y: r(y), w: r(w), h: r(h) };
+    const rawPoints = str(form, `${side.id}:points`);
+    if (rawPoints) {
+      let pts: unknown;
+      try {
+        pts = JSON.parse(rawPoints);
+      } catch {}
+      const ok = Array.isArray(pts) && pts.length >= 3 && pts.length <= 20 &&
+        pts.every((p) => Array.isArray(p) && p.length === 2 && p.every((n) => typeof n === "number" && n >= 0 && n <= 1));
+      if (!ok) return { error: `Check the print area points for ${side.label}.` };
+      const points = (pts as [number, number][]).map(([px, py]): [number, number] => [r(px), r(py)]);
+      const xs = points.map((p) => p[0]), ys = points.map((p) => p[1]);
+      const bx = Math.min(...xs), by = Math.min(...ys);
+      areas[side.id] = { x: bx, y: by, w: r(Math.max(...xs) - bx), h: r(Math.max(...ys) - by), points };
+    }
   }
   const current: ProductOverride = { ...(await getOverrides())[slug], areas };
   await saveOverride(slug, current);

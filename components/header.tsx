@@ -19,10 +19,10 @@ export async function Header() {
           </a>
         </div>
       </div>
-      <div className="container-x flex h-16 items-center gap-4 xl:gap-6">
+      <div className="container-x flex h-20 items-center gap-4 xl:gap-6">
         <MobileMenu categories={categories.map(({ slug, name }) => ({ slug, name }))} signedIn={!!user} staff={!!staff} />
         <Link href="/" className="shrink-0" aria-label={`${site.name} home`}>
-          <Image src="/brand/logo.png" alt={site.name} width={359} height={200} priority className="h-10 w-auto" />
+          <Image src="/brand/maxx_logo.webp" alt={site.name} width={367} height={219} priority className="h-16 w-auto" />
         </Link>
         <nav className="hidden xl:flex items-center gap-4 2xl:gap-5 whitespace-nowrap text-sm font-medium text-ink/80">
           <Link href="/shop" className="hover:text-navy">Shop all</Link>
