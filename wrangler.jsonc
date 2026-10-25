@@ -8,6 +8,10 @@
     "directory": ".open-next/assets",
     "binding": "ASSETS"
   },
+  "routes": [
+    { "pattern": "maxxprintinghtx.com", "custom_domain": true },
+    { "pattern": "www.maxxprintinghtx.com", "custom_domain": true }
+  ],
   // Keep variables and secrets set in the Cloudflare dashboard when a deploy runs.
   "keep_vars": true,
   "observability": { "enabled": true }

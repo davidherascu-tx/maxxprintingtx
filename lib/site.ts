@@ -13,7 +13,7 @@ export const defaultSite = {
   phone: "18328608817",
   phoneDisplay: "(832) 860-8817",
   email: "maxxmktg23@gmail.com",
-  url: "https://maxxprintingtx.com",
+  url: "https://maxxprintinghtx.com",
 };
 
 export type Site = typeof defaultSite;
