@@ -9,7 +9,7 @@ import { useCatalog, useStoreSettings } from "./store";
 import { Price } from "./price";
 
 export function CartView() {
-  const { lines, ready, subtotal, setQty, remove } = useCart();
+  const { lines, ready, subtotal, setQty, remove, shopOpen } = useCart();
   const catalog = useCatalog();
   const { taxRate } = useStoreSettings();
   const tax = calcTax(subtotal, taxRate);
@@ -87,7 +87,11 @@ export function CartView() {
           <div className="flex justify-between border-t border-line pt-2 font-semibold text-navy"><dt>Total</dt><dd>{formatPrice(subtotal + tax)}</dd></div>
           <p className="text-xs text-ink/50">Shipping (if offered for every item) is added at checkout. <Link href="/ordering" className="underline hover:text-navy">How it works</Link></p>
         </dl>
-        <Link href="/checkout" className="btn-primary mt-6 w-full">Checkout</Link>
+        {shopOpen ? (
+          <Link href="/checkout" className="btn-primary mt-6 w-full">Checkout</Link>
+        ) : (
+          <p className="mt-6 rounded-xl bg-white px-4 py-3 text-center text-sm font-semibold text-navy">The shop is closed right now. Checkout is back when we reopen.</p>
+        )}
         <Link href="/shop" className="mt-3 block text-center text-sm text-navy hover:underline">Continue shopping</Link>
       </aside>
     </div>

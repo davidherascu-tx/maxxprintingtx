@@ -3,7 +3,7 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import type { Catalog } from "@/lib/catalog";
 import { requiresDesign } from "@/lib/design-config";
-import { useCatalog } from "./store";
+import { useCatalog, useStoreSettings } from "./store";
 
 export type CartLine = { slug: string; variant: string; color?: string; qty: number; designId?: string; preview?: string };
 
@@ -12,6 +12,8 @@ type CartContextValue = {
   ready: boolean;
   count: number;
   subtotal: number;
+  /** False while staff have closed the shop: nothing can be added or checked out. */
+  shopOpen: boolean;
   add: (line: CartLine) => void;
   setQty: (line: CartLine, qty: number) => void;
   remove: (line: CartLine) => void;
@@ -35,6 +37,7 @@ const isValid = (catalog: Catalog, l: CartLine) =>
 
 export function CartProvider({ children }: { children: React.ReactNode }) {
   const catalog = useCatalog();
+  const { shopOpen } = useStoreSettings();
   const [saved, setLines] = useState<CartLine[]>([]);
   const [ready, setReady] = useState(false);
 
@@ -71,7 +74,9 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       ready,
       count: lines.reduce((n, l) => n + l.qty, 0),
       subtotal: lines.reduce((n, l) => n + linePrice(catalog, l) * l.qty, 0),
+      shopOpen,
       add: (line) =>
+        shopOpen &&
         setLines((prev) =>
           prev.some((l) => same(l, line))
             ? prev.map((l) => (same(l, line) ? { ...l, qty: capQty(l, l.qty + line.qty) } : l))
@@ -82,7 +87,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       remove: (line) => setLines((prev) => prev.filter((l) => !same(l, line))),
       clear: () => setLines((prev) => (prev.length ? [] : prev)),
     };
-  }, [saved, ready, catalog]);
+  }, [saved, ready, catalog, shopOpen]);
 
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>;
 }

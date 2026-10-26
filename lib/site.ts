@@ -12,7 +12,7 @@ export const defaultSite = {
   },
   phone: "18328608817",
   phoneDisplay: "(832) 860-8817",
-  email: "maxxmktg23@gmail.com",
+  email: "info@maxxprinthtx.com",
   url: "https://maxxprintinghtx.com",
 };
 

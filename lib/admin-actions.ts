@@ -477,11 +477,20 @@ export async function saveStoreSettings(_: FormState, form: FormData): Promise<F
     pickup: { enabled: pickup, note: str(form, "pickupNote") || defaultSettings.pickup.note },
     delivery: { enabled: delivery, note: str(form, "deliveryNote") || defaultSettings.delivery.note },
     notifyEmail,
+    shopOpen: current.shopOpen,
     returnPolicy: str(form, "returnPolicy").slice(0, 4000),
   });
   await saveSettings(next);
   revalidateShop();
   return { ok: "Settings saved." };
+}
+
+/** The dashboard's open/close button: closed means no new orders and a popup for visitors. */
+export async function setShopOpen(form: FormData) {
+  await requireStaff();
+  const current = await getSettings();
+  await saveSettings({ ...current, shopOpen: str(form, "open") === "true" });
+  revalidateShop();
 }
 
 export async function saveCustomerAddresses(_: FormState, form: FormData): Promise<FormState> {

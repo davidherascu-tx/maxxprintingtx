@@ -40,7 +40,7 @@ export type StudioProps = {
 
 export function Studio({ product, config, fonts, initial, initialVariant }: StudioProps) {
   const router = useRouter();
-  const { add } = useCart();
+  const { add, shopOpen } = useCart();
   const canvasEl = useRef<HTMLCanvasElement>(null);
   const boxEl = useRef<HTMLDivElement>(null);
   const engineRef = useRef<StudioEngine | null>(null);
@@ -841,8 +841,8 @@ export function Studio({ product, config, fonts, initial, initialVariant }: Stud
               <span className="ml-1 text-sm font-normal text-white/60">and up</span>
             </p>
           )}
-          <button type="button" disabled={!ready || !!busy} onClick={addToCartClicked} className="btn mt-4 w-full bg-magenta text-white hover:brightness-110">
-            Add to cart
+          <button type="button" disabled={!ready || !!busy || !shopOpen} onClick={addToCartClicked} className="btn mt-4 w-full bg-magenta text-white hover:brightness-110 disabled:opacity-60">
+            {shopOpen ? "Add to cart" : "Shop closed"}
           </button>
           {needsDesign && (
             <p className="mt-3 rounded-lg bg-white/10 px-3 py-2 text-sm text-white" role="alert">

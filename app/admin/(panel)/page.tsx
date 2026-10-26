@@ -2,7 +2,9 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { formatPrice } from "@/lib/catalog";
 import { dashboardStats, searchOrders } from "@/lib/db";
+import { setShopOpen } from "@/lib/admin-actions";
 import { requireStaff } from "@/lib/staff-session";
+import { getSettings } from "@/lib/store";
 import { Card } from "@/components/admin/ui";
 import { OrderCards } from "@/components/admin/order-cards";
 import { RevenueChart, type Day } from "@/components/admin/revenue-chart";
@@ -51,7 +53,7 @@ function Money({ label, value }: { label: string; value: number }) {
 
 export default async function AdminHome() {
   const staff = await requireStaff();
-  const [stats, recent] = await Promise.all([dashboardStats(), searchOrders({ payment: "placed" })]);
+  const [stats, recent, { shopOpen }] = await Promise.all([dashboardStats(), searchOrders({ payment: "placed" }), getSettings()]);
   const days = last30(stats.daily);
   const t = stats.todo;
   const todos = [
@@ -70,6 +72,16 @@ export default async function AdminHome() {
       <p className="mt-2 text-lg text-ink/70">
         {todos.length === 0 ? "Here's how the shop is doing." : "Here's what needs doing. Start with the first card."}
       </p>
+
+      <form action={setShopOpen} className={`mt-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border-2 p-4 ${shopOpen ? "border-line bg-white" : "border-magenta/40 bg-magenta/5"}`}>
+        <p className="text-base font-semibold text-navy">
+          {shopOpen ? "🟢 The shop is open. Customers can order." : "🔴 The shop is closed. Customers see a popup and can't order."}
+        </p>
+        <input type="hidden" name="open" value={String(!shopOpen)} />
+        <button className="rounded-full bg-navy px-5 py-2.5 font-bold text-white hover:bg-navy-700">
+          {shopOpen ? "Close the shop" : "Open the shop"}
+        </button>
+      </form>
 
       <section className="mt-6">
         <h2 className="mb-3 text-xl font-bold text-navy">✅ Your to-do list</h2>

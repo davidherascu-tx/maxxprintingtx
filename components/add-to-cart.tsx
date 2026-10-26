@@ -9,7 +9,7 @@ import { useColor } from "./product-color";
 import { VariantPicker } from "./variant-picker";
 
 export function AddToCart({ product }: { product: Product }) {
-  const { add } = useCart();
+  const { add, shopOpen } = useCart();
   const [variantId, setVariantId] = useState(product.variants[0].id);
   const [qty, setQty] = useState(product.minQty);
   const [added, setAdded] = useState(false);
@@ -83,13 +83,14 @@ export function AddToCart({ product }: { product: Product }) {
           )}
           <button
             type="button"
-            className="btn-primary flex-1 py-3.5"
+            className="btn-primary flex-1 py-3.5 disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={!shopOpen}
             onClick={() => {
               add({ slug: product.slug, variant: variantId, color: color?.id, qty: product.noQty ? 1 : qty });
               setAdded(true);
             }}
           >
-            Add to cart · {formatPrice(price * (product.noQty ? 1 : qty))}
+            {shopOpen ? `Add to cart · ${formatPrice(price * (product.noQty ? 1 : qty))}` : "Shop closed"}
           </button>
         </div>
 

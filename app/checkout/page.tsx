@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/session";
+import { getSettings } from "@/lib/store";
 import { CheckoutForm } from "@/components/checkout-form";
 
 export const metadata: Metadata = { title: "Checkout" };
@@ -8,6 +9,7 @@ export const metadata: Metadata = { title: "Checkout" };
 export default async function CheckoutPage() {
   const user = await getCurrentUser();
   if (!user) redirect("/signin?next=/checkout");
+  if (!(await getSettings()).shopOpen) redirect("/cart");
 
   return (
     <div className="container-x py-12">

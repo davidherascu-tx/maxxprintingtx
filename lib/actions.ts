@@ -151,6 +151,7 @@ export async function placeOrder(_: FormState, form: FormData): Promise<FormStat
 
   // Re-price every line from the catalog (with admin edits); never trust client prices.
   const [catalog, settings] = await Promise.all([getCatalog(), getSettings()]);
+  if (!settings.shopOpen) return { error: "The shop is closed right now, so we can't take new orders. Please check back soon." };
   const { getProduct } = catalog;
   const items = (
     await Promise.all(

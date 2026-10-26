@@ -4,6 +4,7 @@ import { CartProvider } from "@/components/cart";
 import { StoreProvider } from "@/components/store";
 import { Header } from "@/components/header";
 import { Footer } from "@/components/footer";
+import { ShopClosedPopup } from "@/components/shop-closed-popup";
 import { getNow, getOverrides, getPublicSettings, getSite } from "@/lib/store";
 import "./globals.css";
 
@@ -19,7 +20,7 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  const [overrides, settings] = await Promise.all([getOverrides(), getPublicSettings()]);
+  const [overrides, settings, site] = await Promise.all([getOverrides(), getPublicSettings(), getSite()]);
   return (
     <html lang="en" className={`${inter.variable} ${display.variable} h-full antialiased`}>
       {/* Browser extensions (e.g. ColorZilla) add attributes to <body> before React loads */}
@@ -29,6 +30,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
             <Header />
             <main className="flex-1">{children}</main>
             <Footer />
+            <ShopClosedPopup phone={site.phoneDisplay} />
           </CartProvider>
         </StoreProvider>
       </body>
